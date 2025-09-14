@@ -17,8 +17,8 @@ REMINDER_THRESHOLD_MINUTES = 5
 # --- KẾT NỐI CƠ SỞ DỮ LIỆU ---
 kv = None
 try:
-    kv_url = os.getenv("teeboov2_REDIS_URL")
-    if not kv_url: raise ValueError("teeboov2_REDIS_URL is not set.")
+    kv_url = os.getenv("REDIS_URL")
+    if not kv_url: raise ValueError("REDIS_URL is not set.")
     kv = Redis.from_url(kv_url, decode_responses=True)
 except Exception as e:
     print(f"FATAL: Could not connect to Redis. Error: {e}")
