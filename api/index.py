@@ -226,22 +226,19 @@ def telegram_webhook():
 
 @app.route('/check_events', methods=['POST'])
 def cron_job_handler():
-    def cron_job_handler():
-    # Lấy giá trị từ client và server
+    # Toàn bộ khối code này bây giờ đã được thụt vào đúng cách
     received_secret = request.headers.get('X-Cron-Secret')
-    server_secret = CRON_SECRET
+    server_secret = os.getenv("CRON_SECRET")
 
-    # In ra log để debug
     print(f"--- DEBUGGING 403 ERROR ---")
     print(f"Secret received from client: '{received_secret}'")
     print(f"Secret configured on server: '{server_secret}'")
     print(f"Are they equal? {received_secret == server_secret}")
     print(f"---------------------------")
 
-    if not all([kv, BOT_TOKEN, CRON_SECRET]): 
+    if not all([kv, BOT_TOKEN, server_secret]): 
         return jsonify(error="Server not configured"), 500
     
-    # So sánh lại
     if received_secret != server_secret: 
         return jsonify(error="Unauthorized"), 403
     
@@ -253,11 +250,13 @@ def cron_job_handler():
     notifications_sent = 0
     now = datetime.now(TIMEZONE)
     subscribers = kv.smembers("event_notification_groups")
-    if not subscribers: return jsonify(success=True, notifications_sent=0)
+    if not subscribers: 
+        return jsonify(success=True, notifications_sent=0)
 
     for event in events:
         event_time = event.get('effective_dt')
-        if not event_time or not (now < event_time <= now + timedelta(minutes=REMINDER_THRESHOLD_MINUTES)): continue
+        if not event_time or not (now < event_time <= now + timedelta(minutes=REMINDER_THRESHOLD_MINUTES)): 
+            continue
         
         event_id = f"{event.get('token')}-{event_time.isoformat()}"
         for chat_id in subscribers:
