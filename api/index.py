@@ -146,62 +146,53 @@ app = Flask(__name__)
 
 # THAY ĐỔI 1: Tách route chính và cho phép cả GET và POST
 @app.route('/', methods=['GET', 'POST'])
-@app.route('/', methods=['GET', 'POST'])
 def telegram_webhook():
+    # Xử lý yêu cầu GET từ Telegram/Vercel
     if request.method == 'GET':
         return "Webhook is active.", 200
 
-    print("--- Received POST request ---") # DEBUG 1: Xác nhận nhận được POST
-    
-    if not BOT_TOKEN:
-        print("FATAL ERROR: BOT_TOKEN is not set!")
-        return "Server config error", 500
+    # Xử lý yêu cầu POST từ Telegram
+    if not BOT_TOKEN: return "Server config error", 500
     
     data = request.get_json()
-    print(f"Received data: {json.dumps(data, indent=2)}") # DEBUG 2: In toàn bộ dữ liệu nhận được
-
     if "callback_query" in data:
-        # ... (logic callback giữ nguyên)
+        cb = data["callback_query"]
+        answer_callback_query(cb["id"])
+        if cb.get("data") == "refresh_events":
+            new_text = get_airdrop_events()
+            if new_text != cb["message"]["text"]:
+                edit_telegram_message(cb["message"]["chat"]["id"], cb["message"]["message_id"], text=new_text, reply_markup=json.dumps(cb["message"]["reply_markup"]))
         return jsonify(success=True)
 
-    if not data or "message" not in data or "text" not in data["message"]:
-        print("Data is not a standard message, skipping.") # DEBUG 3: Kiểm tra xem có phải tin nhắn không
-        return jsonify(success=True)
+    if not data or "message" not in data or "text" not in data["message"]: return jsonify(success=True)
     
     message = data["message"]
     chat_id, msg_id = message["chat"]["id"], message["message_id"]
-    
-    # Rất quan trọng: làm sạch chuỗi text trước khi xử lý
-    text_content = message["text"].strip()
-    cmd = text_content.split()[0].lower()
-    
-    print(f"Detected command: '{cmd}' from chat_id: {chat_id}") # DEBUG 4: In ra lệnh đã được xử lý
+    cmd = message["text"].strip().split()[0].lower()
 
     if cmd == '/start':
-        print("Executing /start command block...") # DEBUG 5: Kiểm tra có vào block này không
         start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n🔹 `/alpha` - Xem sự kiện.\n🔹 `/stop` - Tắt thông báo."
         send_telegram_message(chat_id, text=start_message)
         if kv:
-            print("Redis connected, adding chat_id to subscribers.")
             kv.sadd("event_notification_groups", str(chat_id))
             send_telegram_message(chat_id, text="✅ Đã bật thông báo tự động.")
         else:
-            print("Redis not connected, skipping subscription.")
             send_telegram_message(chat_id, text="⚠️ Lỗi DB, không thể bật thông báo.")
-        print("Finished /start command block.")
 
     elif cmd == '/stop':
-        print("Executing /stop command block...")
-        # ... (logic /stop)
-        
-    elif cmd == '/alpha':
-        print("Executing /alpha command block...")
-        # ... (logic /alpha)
-    
-    else:
-        print(f"Command '{cmd}' not recognized.") # DEBUG 6: Nếu không khớp lệnh nào
+        if kv:
+            kv.srem("event_notification_groups", str(chat_id))
+            send_telegram_message(chat_id, text="✅ Đã tắt thông báo tự động.")
+        else:
+            send_telegram_message(chat_id, text="❌ Lỗi DB, không thể tắt thông báo.")
 
-    print("--- Finished processing request ---")
+    elif cmd == '/alpha':
+        temp_msg_id = send_telegram_message(chat_id, text="🔍 Đang tìm sự kiện...", reply_to_message_id=msg_id)
+        if temp_msg_id:
+            result = get_airdrop_events()
+            reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': '🚀 Trade on Hyperliquid', 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
+            edit_telegram_message(chat_id, temp_msg_id, text=result, reply_markup=json.dumps(reply_markup))
+    
     return jsonify(success=True)
 
 # THAY ĐỔI 2: Tạo một route riêng chỉ cho Cron Job
