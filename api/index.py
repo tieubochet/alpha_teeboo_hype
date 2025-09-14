@@ -226,38 +226,50 @@ def telegram_webhook():
 
 @app.route('/check_events', methods=['POST'])
 def cron_job_handler():
-    # Toàn bộ khối code này bây giờ đã được thụt vào đúng cách
-    received_secret = request.headers.get('X-Cron-Secret')
-    server_secret = os.getenv("CRON_SECRET")
-
-    print(f"--- DEBUGGING 403 ERROR ---")
-    print(f"Secret received from client: '{received_secret}'")
-    print(f"Secret configured on server: '{server_secret}'")
-    print(f"Are they equal? {received_secret == server_secret}")
-    print(f"---------------------------")
-
-    if not all([kv, BOT_TOKEN, server_secret]): 
+    # --- Phần xác thực giữ nguyên ---
+    if not all([kv, BOT_TOKEN, CRON_SECRET]): 
         return jsonify(error="Server not configured"), 500
-    
-    if received_secret != server_secret: 
+    if request.headers.get('X-Cron-Secret') != CRON_SECRET: 
         return jsonify(error="Unauthorized"), 403
     
+    # --- LOGIC GIẢ LẬP THỜI GIAN ---
+    now = datetime.now(TIMEZONE) # Mặc định là thời gian thật
+    fake_time_str = request.args.get('fake_time') # Lấy tham số 'fake_time' từ URL
+
+    if fake_time_str:
+        print(f"--- FAKE TIME MODE ACTIVATED ---")
+        print(f"Received fake_time parameter: {fake_time_str}")
+        try:
+            # Chuyển đổi chuỗi thành đối tượng datetime (định dạng: YYYY-MM-DD-HH-MM)
+            naive_dt = datetime.strptime(fake_time_str, '%Y-%m-%d-%H-%M')
+            # Gán múi giờ cho nó để so sánh chính xác
+            now = TIMEZONE.localize(naive_dt)
+            print(f"SUCCESS: Using fake time: {now.isoformat()}")
+        except ValueError:
+            print(f"WARNING: Invalid fake_time format. It should be YYYY-MM-DD-HH-MM. Falling back to real time.")
+    else:
+        print(f"Using real time: {now.isoformat()}")
+    # --- KẾT THÚC LOGIC GIẢ LẬP ---
+
+    # --- Phần logic chính của Cron Job giữ nguyên, nhưng giờ nó sẽ dùng biến 'now' (thật hoặc giả) ---
     events, error = _get_processed_airdrop_events()
     if error or not events:
         print(f"Cron: Could not fetch events: {error or 'No events found.'}")
         return jsonify(success=True, notifications_sent=0)
     
     notifications_sent = 0
-    now = datetime.now(TIMEZONE)
     subscribers = kv.smembers("event_notification_groups")
     if not subscribers: 
         return jsonify(success=True, notifications_sent=0)
 
     for event in events:
         event_time = event.get('effective_dt')
+        # Điều kiện so sánh bây giờ sẽ dùng 'now' đã được gán ở trên
         if not event_time or not (now < event_time <= now + timedelta(minutes=REMINDER_THRESHOLD_MINUTES)): 
             continue
         
+        # Nếu điều kiện đúng, gửi thông báo
+        print(f"MATCH FOUND! Event: {event.get('token')} at {event_time.isoformat()}. Current time: {now.isoformat()}")
         event_id = f"{event.get('token')}-{event_time.isoformat()}"
         for chat_id in subscribers:
             redis_key = f"event_notified:{chat_id}:{event_id}"
@@ -269,5 +281,6 @@ def cron_job_handler():
                     pin_telegram_message(chat_id, sent_message_id)
                     notifications_sent += 1
                     kv.set(redis_key, "1", ex=3600)
+    
     print(f"Cron check finished. Sent: {notifications_sent} notifications.")
-    return jsonify(success=True, notifications_sent=notifications_sent)
+    return jsonify(success=True, notifications_sent=notifications_sent, used_time=now.isoformat())
