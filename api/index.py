@@ -94,7 +94,7 @@ def get_airdrop_events() -> tuple[str, str | None]:
                 price_str = f" (`${price_value:,.4f}`)"
                 try: value_str = f"\n  Value: `${float(amount_str) * price_value:,.2f}`"
                 except (ValueError, TypeError): pass
-        return f"*{name}  ({token})*{price_str}\n  Điểm: `{points}` \n  Số lượng: `{amount_str}`{value_str}\n  Thời gian: `{display_time}`"
+        return f"*{name} ({token})*{price_str}\n  Điểm: `{points}` \n  Số lượng: `{amount_str}`{value_str}\n  Thời gian: `{display_time}`"
 
     now_vietnam = datetime.now(TIMEZONE)
     today_date = now_vietnam.date()
@@ -111,17 +111,17 @@ def get_airdrop_events() -> tuple[str, str | None]:
     upcoming_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     
     message_parts, price_data = [], processed_events[0]['price_data'] if processed_events else {}
-    if todays_events: message_parts.append("🎁 *Airdrops Hôm Nay:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]))
+    if todays_events: message_parts.append("\n🎁 *Airdrops Hôm Nay:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]))
     if upcoming_events:
         if message_parts: message_parts.append("\n\n" + "-"*25 + "\n\n")
-        message_parts.append("🗓️ *Airdrops Sắp Tới:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt'], True) for e in upcoming_events]))
+        message_parts.append("\n🗓️ *Airdrops Sắp Tới:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt'], True) for e in upcoming_events]))
     
     final_message = "".join(message_parts) if message_parts else "ℹ️ Không có sự kiện nào sắp tới."
     
     # --- THÊM DÒNG CHỮ MỚI TẠI ĐÂY ---
     # Chỉ thêm tin nhắn ref khi có sự kiện được hiển thị
     if message_parts:
-        promo_text = "\n\n*Nếu bạn thấy bot hữu ích, xin hãy cho tôi 1 link ref bằng cách ấn vào link bên dưới:*"
+        promo_text = "\n\n*🔗 Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm giảm 4% phí trade cho bạn. Win–Win cùng nhau!*"
         final_message += promo_text
 
     # Tìm token của sự kiện gần nhất
