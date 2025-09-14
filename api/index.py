@@ -17,12 +17,10 @@ CRON_SECRET = os.getenv("CRON_SECRET")
 REMINDER_THRESHOLD_MINUTES = 5
 
 # --- KẾT NỐI CƠ SỞ DỮ LIỆU ---
-# Vercel có thể tạm dừng các kết nối. Sử dụng try/except để xử lý an toàn.
 kv = None
 try:
     kv_url = os.getenv("REDIS_URL")
-    if not kv_url: raise ValueError("teeboov2_REDIS_URL is not set.")
-    # decode_responses=True rất quan trọng để làm việc với chuỗi
+    if not kv_url: raise ValueError("REDIS_URL is not set.")
     kv = Redis.from_url(kv_url, decode_responses=True)
 except Exception as e:
     print(f"FATAL: Could not connect to Redis. Error: {e}")
@@ -43,7 +41,7 @@ def _get_processed_airdrop_events():
     def _get_price_data():
         try:
             res = requests.get(PRICE_API_URL, headers=HEADERS, timeout=10)
-            res.raise_for_status() # Ném lỗi nếu status code không phải 2xx
+            res.raise_for_status()
             price_json = res.json()
             if price_json.get('success') and 'prices' in price_json:
                 return price_json['prices']
@@ -193,27 +191,36 @@ def webhook(path):
     parts = text.split()
     cmd = parts[0].lower()
 
-    if cmd == '/event':
+    if cmd == '/start':
+        start_message = (
+            "Bot Airdrop Alpha đã sẵn sàng!\n\n"
+            "Sử dụng các lệnh sau:\n"
+            "🔹 `/alpha` - Xem danh sách sự kiện airdrop.\n"
+            "🔹 `/stop` - Tắt nhận thông báo tự động."
+        )
+        send_telegram_message(chat_id, text=start_message)
+        
+        # Tự động bật thông báo khi start
+        if not kv:
+            send_telegram_message(chat_id, text="⚠️ Lỗi: Không kết nối được với DB, không thể bật thông báo.")
+        else:
+            kv.sadd("event_notification_groups", str(chat_id))
+            send_telegram_message(chat_id, text="✅ Đã tự động bật thông báo sự kiện cho nhóm này.")
+
+    elif cmd == '/stop':
+        if not kv:
+            send_telegram_message(chat_id, text="❌ Lỗi: Không thể thực hiện do không kết nối được DB.")
+        else:
+            kv.srem("event_notification_groups", str(chat_id))
+            send_telegram_message(chat_id, text="✅ Đã tắt tính năng tự động thông báo sự kiện trong nhóm này.")
+
+    elif cmd == '/alpha':
         temp_msg_id = send_telegram_message(chat_id, text="🔍 Đang tìm sự kiện airdrop...", reply_to_message_id=msg_id)
         if temp_msg_id:
             result = get_airdrop_events()
             reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': '🚀 Trade on Hyperliquid', 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
             edit_telegram_message(chat_id, temp_msg_id, text=result, reply_markup=json.dumps(reply_markup))
-    elif cmd == "/autonotify":
-        if len(parts) < 2 or parts[1].lower() not in ['on', 'off']:
-            send_telegram_message(chat_id, text="Cú pháp sai. Dùng: `/autonotify on` hoặc `/autonotify off`.", reply_to_message_id=msg_id)
-            return jsonify(success=True)
-        sub_command = parts[1].lower()
-        if not kv:
-            send_telegram_message(chat_id, text="❌ Lỗi: Không thể thực hiện do không kết nối được DB.")
-            return jsonify(success=True)
-        if sub_command == 'on':
-            kv.sadd("event_notification_groups", str(chat_id))
-            send_telegram_message(chat_id, text="✅ Đã bật thông báo tự động cho các sự kiện airdrop trong nhóm này.")
-        else:
-            kv.srem("event_notification_groups", str(chat_id))
-            send_telegram_message(chat_id, text="✅ Đã tắt thông báo tự động sự kiện trong nhóm này.")
-
+    
     return jsonify(success=True)
 
 # --- LOGIC CRON JOB ---
