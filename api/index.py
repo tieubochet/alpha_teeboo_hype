@@ -75,7 +75,6 @@ def _get_processed_airdrop_events():
     except requests.RequestException: return None, "❌ Network error when fetching data."
     except json.JSONDecodeError: return None, "❌ Invalid data format from API."
 
-# THAY ĐỔI 1: Hàm này giờ trả về (chuỗi tin nhắn, token tiếp theo)
 def get_airdrop_events() -> tuple[str, str | None]:
     processed_events, error_message = _get_processed_airdrop_events()
     if error_message: return error_message, None
@@ -118,6 +117,12 @@ def get_airdrop_events() -> tuple[str, str | None]:
         message_parts.append("🗓️ *Airdrops Sắp Tới:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt'], True) for e in upcoming_events]))
     
     final_message = "".join(message_parts) if message_parts else "ℹ️ Không có sự kiện nào sắp tới."
+    
+    # --- THÊM DÒNG CHỮ MỚI TẠI ĐÂY ---
+    # Chỉ thêm tin nhắn ref khi có sự kiện được hiển thị
+    if message_parts:
+        promo_text = "\n\n*Nếu bạn thấy bot hữu ích, xin hãy cho tôi 1 link ref bằng cách ấn vào link bên dưới:*"
+        final_message += promo_text
 
     # Tìm token của sự kiện gần nhất
     next_event_token = None
@@ -166,16 +171,14 @@ def telegram_webhook():
         cb = data["callback_query"]
         answer_callback_query(cb["id"])
         if cb.get("data") == "refresh_events":
-            # THAY ĐỔI 3: Logic refresh giờ cũng cập nhật button
             new_text, next_token = get_airdrop_events()
             
             button_text = '🚀 Trade on Hyperliquid'
             if next_token:
                 button_text = f'🚀 Trade {next_token.upper()} on Hyperliquid'
 
-            new_reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
+            new_reply_markup = {'inline_keyboard': [[{'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
             
-            # Chỉ edit nếu nội dung hoặc nút bấm có thay đổi
             if new_text != cb["message"]["text"] or json.dumps(new_reply_markup) != json.dumps(cb["message"].get("reply_markup")):
                 edit_telegram_message(
                     cb["message"]["chat"]["id"], 
@@ -192,7 +195,7 @@ def telegram_webhook():
     cmd = message["text"].strip().split()[0].lower()
 
     if cmd == '/start':
-        start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n🔹 `/alpha` - Xem sự kiện.\n🔹 `/stop` - Tắt thông báo."
+        start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n`/alpha` - Xem sự kiện.\n`/stop` - Dừng bot & tắt thông báo."
         send_telegram_message(chat_id, text=start_message)
         if kv:
             kv.sadd("event_notification_groups", str(chat_id))
@@ -210,16 +213,13 @@ def telegram_webhook():
     elif cmd == '/alpha':
         temp_msg_id = send_telegram_message(chat_id, text="🔍 Đang tìm sự kiện...", reply_to_message_id=msg_id)
         if temp_msg_id:
-            # THAY ĐỔI 2: Lấy cả text và token
             result, next_token = get_airdrop_events()
             
-            # Tạo nội dung button động
             button_text = '🚀 Trade on Hyperliquid'
             if next_token:
                 button_text = f'🚀 Trade {next_token.upper()} on Hyperliquid'
             
-            # Sử dụng button_text đã tạo
-            reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
+            reply_markup = {'inline_keyboard': [[{'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
             edit_telegram_message(chat_id, temp_msg_id, text=result, reply_markup=json.dumps(reply_markup))
     
     return jsonify(success=True)
