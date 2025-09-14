@@ -232,26 +232,49 @@ def cron_job_handler():
     if request.headers.get('X-Cron-Secret') != CRON_SECRET: 
         return jsonify(error="Unauthorized"), 403
     
-    # --- LOGIC GIẢ LẬP THỜI GIAN ---
-    now = datetime.now(TIMEZONE) # Mặc định là thời gian thật
-    fake_time_str = request.args.get('fake_time') # Lấy tham số 'fake_time' từ URL
+    # --- LOGIC GIẢ LẬP VÀ TEST ---
+    real_now = datetime.now(TIMEZONE) # Luôn lấy thời gian thật
+    now = real_now # Mặc định 'now' để xử lý là thời gian thật
+    
+    is_test_mode = request.args.get('test_next_event') == 'true'
+    fake_time_str = request.args.get('fake_time')
 
-    if fake_time_str:
+    if is_test_mode:
+        print(f"--- TEST MODE ACTIVATED ---")
+        # Chế độ test này sẽ ghi đè lên fake_time nếu có
+        events, error = _get_processed_airdrop_events()
+        if not error and events:
+            # Tìm sự kiện gần nhất trong tương lai
+            future_events = sorted(
+                [e for e in events if e.get('effective_dt') and e.get('effective_dt') > real_now],
+                key=lambda x: x['effective_dt']
+            )
+            
+            if future_events:
+                next_event = future_events[0]
+                event_time = next_event.get('effective_dt')
+                # Giả lập 'now' là 4 phút trước khi sự kiện diễn ra
+                now = event_time - timedelta(minutes=4)
+                print(f"Found next event: {next_event.get('token')} at {event_time.isoformat()}")
+                print(f"SUCCESS: Simulating current time as: {now.isoformat()}")
+            else:
+                print("WARNING: Test mode enabled, but no future events found to test.")
+        else:
+            print("WARNING: Test mode enabled, but could not fetch events.")
+            
+    elif fake_time_str:
         print(f"--- FAKE TIME MODE ACTIVATED ---")
-        print(f"Received fake_time parameter: {fake_time_str}")
         try:
-            # Chuyển đổi chuỗi thành đối tượng datetime (định dạng: YYYY-MM-DD-HH-MM)
             naive_dt = datetime.strptime(fake_time_str, '%Y-%m-%d-%H-%M')
-            # Gán múi giờ cho nó để so sánh chính xác
             now = TIMEZONE.localize(naive_dt)
             print(f"SUCCESS: Using fake time: {now.isoformat()}")
         except ValueError:
-            print(f"WARNING: Invalid fake_time format. It should be YYYY-MM-DD-HH-MM. Falling back to real time.")
+            print(f"WARNING: Invalid fake_time format. Falling back to real time.")
     else:
         print(f"Using real time: {now.isoformat()}")
     # --- KẾT THÚC LOGIC GIẢ LẬP ---
 
-    # --- Phần logic chính của Cron Job giữ nguyên, nhưng giờ nó sẽ dùng biến 'now' (thật hoặc giả) ---
+    # --- Phần logic chính của Cron Job giữ nguyên ---
     events, error = _get_processed_airdrop_events()
     if error or not events:
         print(f"Cron: Could not fetch events: {error or 'No events found.'}")
@@ -264,11 +287,9 @@ def cron_job_handler():
 
     for event in events:
         event_time = event.get('effective_dt')
-        # Điều kiện so sánh bây giờ sẽ dùng 'now' đã được gán ở trên
         if not event_time or not (now < event_time <= now + timedelta(minutes=REMINDER_THRESHOLD_MINUTES)): 
             continue
         
-        # Nếu điều kiện đúng, gửi thông báo
         print(f"MATCH FOUND! Event: {event.get('token')} at {event_time.isoformat()}. Current time: {now.isoformat()}")
         event_id = f"{event.get('token')}-{event_time.isoformat()}"
         for chat_id in subscribers:
