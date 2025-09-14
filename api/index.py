@@ -2,8 +2,6 @@
 import os
 import json
 import requests
-import hashlib
-import hmac
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import pytz
@@ -19,18 +17,14 @@ REMINDER_THRESHOLD_MINUTES = 5
 # --- KẾT NỐI CƠ SỞ DỮ LIỆU ---
 kv = None
 try:
-    kv_url = os.getenv("REDIS_URL")
-    if not kv_url: raise ValueError("REDIS_URL is not set.")
+    kv_url = os.getenv("teeboov2_REDIS_URL")
+    if not kv_url: raise ValueError("teeboov2_REDIS_URL is not set.")
     kv = Redis.from_url(kv_url, decode_responses=True)
 except Exception as e:
     print(f"FATAL: Could not connect to Redis. Error: {e}")
 
 # --- LOGIC QUẢN LÝ CÔNG VIỆC ---
 def _get_processed_airdrop_events():
-    """
-    Hàm nội bộ: Lấy và xử lý dữ liệu airdrop, trả về danh sách các sự kiện
-    đã được lọc với thời gian hiệu lực đã được tính toán.
-    """
     AIRDROP_API_URL = "https://alpha123.uk/api/data?fresh=1"
     PRICE_API_URL = "https://alpha123.uk/api/price/?batch=today"
     HEADERS = {
@@ -57,24 +51,18 @@ def _get_processed_airdrop_events():
         return list(processed.values())
 
     def _get_effective_event_time(event):
-        event_date_str = event.get('date')
-        event_time_str = event.get('time')
-        if not (event_date_str and event_time_str and ':' in event_time_str):
-            return None
+        event_date_str, event_time_str = event.get('date'), event.get('time')
+        if not (event_date_str and event_time_str and ':' in event_time_str): return None
         try:
             cleaned_time_str = event_time_str.strip().split()[0]
             naive_dt = datetime.strptime(f"{event_date_str} {cleaned_time_str}", '%Y-%m-%d %H:%M')
-            if event.get('phase') == 2:
-                naive_dt += timedelta(hours=18)
-            china_dt = CHINA_TIMEZONE.localize(naive_dt)
-            vietnam_dt = china_dt.astimezone(TIMEZONE)
-            return vietnam_dt
-        except (ValueError, pytz.exceptions.PyTZError):
-            return None
+            if event.get('phase') == 2: naive_dt += timedelta(hours=18)
+            return CHINA_TIMEZONE.localize(naive_dt).astimezone(TIMEZONE)
+        except (ValueError, pytz.exceptions.PyTZError): return None
 
     try:
         airdrop_res = requests.get(AIRDROP_API_URL, headers=HEADERS, timeout=20)
-        if airdrop_res.status_code != 200: return None, f"❌ Lỗi khi gọi API sự kiện (Code: {airdrop_res.status_code})."
+        if airdrop_res.status_code != 200: return None, f"❌ API Error (Code: {airdrop_res.status_code})."
         data = airdrop_res.json()
         airdrops = data.get('airdrops', [])
         if not airdrops: return [], None
@@ -84,14 +72,13 @@ def _get_processed_airdrop_events():
             event['effective_dt'] = _get_effective_event_time(event)
             event['price_data'] = price_data
         return definitive_events, None
-    except requests.RequestException: return None, "❌ Lỗi mạng khi lấy dữ liệu sự kiện."
-    except json.JSONDecodeError: return None, "❌ Dữ liệu trả về từ API sự kiện không hợp lệ."
+    except requests.RequestException: return None, "❌ Network error when fetching data."
+    except json.JSONDecodeError: return None, "❌ Invalid data format from API."
 
 def get_airdrop_events() -> str:
-    """Hàm giao diện: Định dạng kết quả thành tin nhắn cho người dùng."""
     processed_events, error_message = _get_processed_airdrop_events()
     if error_message: return error_message
-    if not processed_events: return "ℹ️ Không tìm thấy sự kiện airdrop nào."
+    if not processed_events: return "ℹ️ No airdrop events found."
 
     def _format_event_message(event, price_data, effective_dt, include_date=False):
         token, name = event.get('token', 'N/A'), event.get('name', 'N/A')
@@ -107,9 +94,7 @@ def get_airdrop_events() -> str:
                 price_str = f" (`${price_value:,.4f}`)"
                 try: value_str = f"\n  Value: `${float(amount_str) * price_value:,.2f}`"
                 except (ValueError, TypeError): pass
-        return (f"*{token} - {name}*{price_str}\n"
-                f"  Points: `{points}` | Amount: `{amount_str}`{value_str}\n"
-                f"  Time: `{display_time}`")
+        return f"*{token} - {name}*{price_str}\n  Points: `{points}` | Amount: `{amount_str}`{value_str}\n  Time: `{display_time}`"
 
     now_vietnam = datetime.now(TIMEZONE)
     today_date = now_vietnam.date()
@@ -121,22 +106,21 @@ def get_airdrop_events() -> str:
         except (ValueError, TypeError): continue
         if event_day == today_date: todays_events.append(event)
         elif event_day > today_date: upcoming_events.append(event)
-
+    
     todays_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     upcoming_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     
     message_parts, price_data = [], processed_events[0]['price_data'] if processed_events else {}
-    if todays_events:
-        message_parts.append("🎁 *Today's Airdrops:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]))
+    if todays_events: message_parts.append("🎁 *Today's Airdrops:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]))
     if upcoming_events:
         if message_parts: message_parts.append("\n\n" + "-"*25 + "\n\n")
         message_parts.append("🗓️ *Upcoming Airdrops:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt'], True) for e in upcoming_events]))
     
-    return "".join(message_parts) if message_parts else "ℹ️ Không có sự kiện nào sắp tới."
+    return "".join(message_parts) if message_parts else "ℹ️ No upcoming events."
 
 # --- HÀM HỖ TRỢ TELEGRAM ---
-def send_telegram_message(chat_id, text, **kwargs) -> int | None:
-    if not BOT_TOKEN: return None
+def send_telegram_message(chat_id, text, **kwargs):
+    if not BOT_TOKEN: return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown', **kwargs}
     try:
@@ -144,35 +128,32 @@ def send_telegram_message(chat_id, text, **kwargs) -> int | None:
         if response.status_code == 200 and response.json().get('ok'): return response.json().get('result', {}).get('message_id')
         print(f"Error sending message: {response.text}")
     except requests.RequestException as e: print(f"Error sending message: {e}")
-    return None
+
 def pin_telegram_message(chat_id, message_id):
     if not BOT_TOKEN: return
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/pinChatMessage"
-    payload = {'chat_id': chat_id, 'message_id': message_id, 'disable_notification': False}
-    try: requests.post(url, json=payload, timeout=10)
-    except requests.RequestException as e: print(f"Error pinning message: {e}")
+    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/pinChatMessage", json={'chat_id': chat_id, 'message_id': message_id, 'disable_notification': False}, timeout=10)
+
 def edit_telegram_message(chat_id, msg_id, text, **kwargs):
     if not BOT_TOKEN: return
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-    payload = {'chat_id': chat_id, 'message_id': msg_id, 'text': text, 'parse_mode': 'Markdown', **kwargs}
-    try: requests.post(url, json=payload, timeout=10)
-    except requests.RequestException as e: print(f"Error editing message: {e}")
+    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText", json={'chat_id': chat_id, 'message_id': msg_id, 'text': text, 'parse_mode': 'Markdown', **kwargs}, timeout=10)
+
 def answer_callback_query(cb_id):
     if not BOT_TOKEN: return
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
-    try: requests.post(url, json={'callback_query_id': cb_id}, timeout=5)
-    except requests.RequestException as e: print(f"Error answering callback: {e}")
+    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", json={'callback_query_id': cb_id}, timeout=5)
 
 # --- WEB SERVER (FLASK) ---
 app = Flask(__name__)
 
-@app.route('/', defaults={'path': ''}, methods=['POST'])
-@app.route('/<path:path>', methods=['POST'])
-def webhook(path):
-    if not BOT_TOKEN: return "Server configuration error", 500
-    if request.path == '/check_events':
-        return event_cron_webhook()
+# THAY ĐỔI 1: Tách route chính và cho phép cả GET và POST
+@app.route('/', methods=['GET', 'POST'])
+def telegram_webhook():
+    # Xử lý yêu cầu GET từ Telegram/Vercel
+    if request.method == 'GET':
+        return "Webhook is active.", 200
 
+    # Xử lý yêu cầu POST từ Telegram
+    if not BOT_TOKEN: return "Server config error", 500
+    
     data = request.get_json()
     if "callback_query" in data:
         cb = data["callback_query"]
@@ -183,39 +164,30 @@ def webhook(path):
                 edit_telegram_message(cb["message"]["chat"]["id"], cb["message"]["message_id"], text=new_text, reply_markup=json.dumps(cb["message"]["reply_markup"]))
         return jsonify(success=True)
 
-    if "message" not in data or "text" not in data["message"]: return jsonify(success=True)
+    if not data or "message" not in data or "text" not in data["message"]: return jsonify(success=True)
     
     message = data["message"]
     chat_id, msg_id = message["chat"]["id"], message["message_id"]
-    text = message["text"].strip()
-    parts = text.split()
-    cmd = parts[0].lower()
+    cmd = message["text"].strip().split()[0].lower()
 
     if cmd == '/start':
-        start_message = (
-            "Bot Airdrop Alpha đã sẵn sàng!\n\n"
-            "Sử dụng các lệnh sau:\n"
-            "🔹 `/alpha` - Xem danh sách sự kiện airdrop.\n"
-            "🔹 `/stop` - Tắt nhận thông báo tự động."
-        )
+        start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n🔹 `/alpha` - Xem sự kiện.\n🔹 `/stop` - Tắt thông báo."
         send_telegram_message(chat_id, text=start_message)
-        
-        # Tự động bật thông báo khi start
-        if not kv:
-            send_telegram_message(chat_id, text="⚠️ Lỗi: Không kết nối được với DB, không thể bật thông báo.")
-        else:
+        if kv:
             kv.sadd("event_notification_groups", str(chat_id))
-            send_telegram_message(chat_id, text="✅ Đã tự động bật thông báo sự kiện cho nhóm này.")
+            send_telegram_message(chat_id, text="✅ Đã bật thông báo tự động.")
+        else:
+            send_telegram_message(chat_id, text="⚠️ Lỗi DB, không thể bật thông báo.")
 
     elif cmd == '/stop':
-        if not kv:
-            send_telegram_message(chat_id, text="❌ Lỗi: Không thể thực hiện do không kết nối được DB.")
-        else:
+        if kv:
             kv.srem("event_notification_groups", str(chat_id))
-            send_telegram_message(chat_id, text="✅ Đã tắt tính năng tự động thông báo sự kiện trong nhóm này.")
+            send_telegram_message(chat_id, text="✅ Đã tắt thông báo tự động.")
+        else:
+            send_telegram_message(chat_id, text="❌ Lỗi DB, không thể tắt thông báo.")
 
     elif cmd == '/alpha':
-        temp_msg_id = send_telegram_message(chat_id, text="🔍 Đang tìm sự kiện airdrop...", reply_to_message_id=msg_id)
+        temp_msg_id = send_telegram_message(chat_id, text="🔍 Đang tìm sự kiện...", reply_to_message_id=msg_id)
         if temp_msg_id:
             result = get_airdrop_events()
             reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': '🚀 Trade on Hyperliquid', 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
@@ -223,18 +195,22 @@ def webhook(path):
     
     return jsonify(success=True)
 
-# --- LOGIC CRON JOB ---
-def check_events_and_notify_groups():
-    if not kv: return 0
+# THAY ĐỔI 2: Tạo một route riêng chỉ cho Cron Job
+@app.route('/check_events', methods=['POST'])
+def cron_job_handler():
+    if not all([kv, BOT_TOKEN, CRON_SECRET]): return jsonify(error="Server not configured"), 500
+    if request.headers.get('X-Cron-Secret') != CRON_SECRET: return jsonify(error="Unauthorized"), 403
+    
+    # --- Logic của Cron Job ---
     events, error = _get_processed_airdrop_events()
     if error or not events:
         print(f"Cron: Could not fetch events: {error or 'No events found.'}")
-        return 0
+        return jsonify(success=True, notifications_sent=0)
     
     notifications_sent = 0
     now = datetime.now(TIMEZONE)
     subscribers = kv.smembers("event_notification_groups")
-    if not subscribers: return 0
+    if not subscribers: return jsonify(success=True, notifications_sent=0)
 
     for event in events:
         event_time = event.get('effective_dt')
@@ -245,22 +221,11 @@ def check_events_and_notify_groups():
             redis_key = f"event_notified:{chat_id}:{event_id}"
             if not kv.exists(redis_key):
                 minutes_left = int((event_time - now).total_seconds() / 60) + 1
-                message = (f"‼️ *THÔNG BÁO* ‼️\n\n"
-                           f"Sự kiện: *{event.get('name', 'N/A')} ({event.get('token', 'N/A')})*\n"
-                           f"Sẽ diễn ra trong vòng *{minutes_left} phút* nữa.")
+                message = f"‼️ *THÔNG BÁO* ‼️\n\nSự kiện: *{event.get('name', 'N/A')} ({event.get('token', 'N/A')})*\nSẽ diễn ra trong vòng *{minutes_left} phút* nữa."
                 sent_message_id = send_telegram_message(chat_id, text=message)
                 if sent_message_id:
                     pin_telegram_message(chat_id, sent_message_id)
                     notifications_sent += 1
                     kv.set(redis_key, "1", ex=3600)
     print(f"Cron check finished. Sent: {notifications_sent} notifications.")
-    return notifications_sent
-
-def event_cron_webhook():
-    if not all([kv, BOT_TOKEN, CRON_SECRET]):
-        return jsonify(error="Server not configured"), 500
-    secret = request.headers.get('X-Cron-Secret')
-    if secret != CRON_SECRET:
-        return jsonify(error="Unauthorized"), 403
-    sent_count = check_events_and_notify_groups()
-    return jsonify(success=True, notifications_sent=sent_count)
+    return jsonify(success=True, notifications_sent=notifications_sent)
