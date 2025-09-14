@@ -75,10 +75,11 @@ def _get_processed_airdrop_events():
     except requests.RequestException: return None, "❌ Network error when fetching data."
     except json.JSONDecodeError: return None, "❌ Invalid data format from API."
 
-def get_airdrop_events() -> str:
+# THAY ĐỔI 1: Hàm này giờ trả về (chuỗi tin nhắn, token tiếp theo)
+def get_airdrop_events() -> tuple[str, str | None]:
     processed_events, error_message = _get_processed_airdrop_events()
-    if error_message: return error_message
-    if not processed_events: return "ℹ️ No airdrop events found."
+    if error_message: return error_message, None
+    if not processed_events: return "ℹ️ No airdrop events found.", None
 
     def _format_event_message(event, price_data, effective_dt, include_date=False):
         token, name = event.get('token', 'N/A'), event.get('name', 'N/A')
@@ -94,7 +95,7 @@ def get_airdrop_events() -> str:
                 price_str = f" (`${price_value:,.4f}`)"
                 try: value_str = f"\n  Value: `${float(amount_str) * price_value:,.2f}`"
                 except (ValueError, TypeError): pass
-        return f"*{token} - {name}*{price_str}\n  Points: `{points}` | Amount: `{amount_str}`{value_str}\n  Time: `{display_time}`"
+        return f"*{name}  ({token})*{price_str}\n  Điểm: `{points}` \n  Số lượng: `{amount_str}`{value_str}\n  Thời gian: `{display_time}`"
 
     now_vietnam = datetime.now(TIMEZONE)
     today_date = now_vietnam.date()
@@ -111,12 +112,21 @@ def get_airdrop_events() -> str:
     upcoming_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     
     message_parts, price_data = [], processed_events[0]['price_data'] if processed_events else {}
-    if todays_events: message_parts.append("🎁 *Today's Airdrops:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]))
+    if todays_events: message_parts.append("🎁 *Airdrops Hôm Nay:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]))
     if upcoming_events:
         if message_parts: message_parts.append("\n\n" + "-"*25 + "\n\n")
-        message_parts.append("🗓️ *Upcoming Airdrops:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt'], True) for e in upcoming_events]))
+        message_parts.append("🗓️ *Airdrops Sắp Tới:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt'], True) for e in upcoming_events]))
     
-    return "".join(message_parts) if message_parts else "ℹ️ No upcoming events."
+    final_message = "".join(message_parts) if message_parts else "ℹ️ Không có sự kiện nào sắp tới."
+
+    # Tìm token của sự kiện gần nhất
+    next_event_token = None
+    if todays_events:
+        next_event_token = todays_events[0].get('token')
+    elif upcoming_events:
+        next_event_token = upcoming_events[0].get('token')
+
+    return final_message, next_event_token
 
 # --- HÀM HỖ TRỢ TELEGRAM ---
 def send_telegram_message(chat_id, text, **kwargs):
@@ -144,14 +154,11 @@ def answer_callback_query(cb_id):
 # --- WEB SERVER (FLASK) ---
 app = Flask(__name__)
 
-# THAY ĐỔI 1: Tách route chính và cho phép cả GET và POST
 @app.route('/', methods=['GET', 'POST'])
 def telegram_webhook():
-    # Xử lý yêu cầu GET từ Telegram/Vercel
     if request.method == 'GET':
         return "Webhook is active.", 200
 
-    # Xử lý yêu cầu POST từ Telegram
     if not BOT_TOKEN: return "Server config error", 500
     
     data = request.get_json()
@@ -159,9 +166,23 @@ def telegram_webhook():
         cb = data["callback_query"]
         answer_callback_query(cb["id"])
         if cb.get("data") == "refresh_events":
-            new_text = get_airdrop_events()
-            if new_text != cb["message"]["text"]:
-                edit_telegram_message(cb["message"]["chat"]["id"], cb["message"]["message_id"], text=new_text, reply_markup=json.dumps(cb["message"]["reply_markup"]))
+            # THAY ĐỔI 3: Logic refresh giờ cũng cập nhật button
+            new_text, next_token = get_airdrop_events()
+            
+            button_text = '🚀 Trade on Hyperliquid'
+            if next_token:
+                button_text = f'🚀 Trade {next_token.upper()} on Hyperliquid'
+
+            new_reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
+            
+            # Chỉ edit nếu nội dung hoặc nút bấm có thay đổi
+            if new_text != cb["message"]["text"] or json.dumps(new_reply_markup) != json.dumps(cb["message"].get("reply_markup")):
+                edit_telegram_message(
+                    cb["message"]["chat"]["id"], 
+                    cb["message"]["message_id"], 
+                    text=new_text, 
+                    reply_markup=json.dumps(new_reply_markup)
+                )
         return jsonify(success=True)
 
     if not data or "message" not in data or "text" not in data["message"]: return jsonify(success=True)
@@ -189,19 +210,25 @@ def telegram_webhook():
     elif cmd == '/alpha':
         temp_msg_id = send_telegram_message(chat_id, text="🔍 Đang tìm sự kiện...", reply_to_message_id=msg_id)
         if temp_msg_id:
-            result = get_airdrop_events()
-            reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': '🚀 Trade on Hyperliquid', 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
+            # THAY ĐỔI 2: Lấy cả text và token
+            result, next_token = get_airdrop_events()
+            
+            # Tạo nội dung button động
+            button_text = '🚀 Trade on Hyperliquid'
+            if next_token:
+                button_text = f'🚀 Trade {next_token.upper()} on Hyperliquid'
+            
+            # Sử dụng button_text đã tạo
+            reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
             edit_telegram_message(chat_id, temp_msg_id, text=result, reply_markup=json.dumps(reply_markup))
     
     return jsonify(success=True)
 
-# THAY ĐỔI 2: Tạo một route riêng chỉ cho Cron Job
 @app.route('/check_events', methods=['POST'])
 def cron_job_handler():
     if not all([kv, BOT_TOKEN, CRON_SECRET]): return jsonify(error="Server not configured"), 500
     if request.headers.get('X-Cron-Secret') != CRON_SECRET: return jsonify(error="Unauthorized"), 403
     
-    # --- Logic của Cron Job ---
     events, error = _get_processed_airdrop_events()
     if error or not events:
         print(f"Cron: Could not fetch events: {error or 'No events found.'}")
