@@ -226,8 +226,24 @@ def telegram_webhook():
 
 @app.route('/check_events', methods=['POST'])
 def cron_job_handler():
-    if not all([kv, BOT_TOKEN, CRON_SECRET]): return jsonify(error="Server not configured"), 500
-    if request.headers.get('X-Cron-Secret') != CRON_SECRET: return jsonify(error="Unauthorized"), 403
+    def cron_job_handler():
+    # Lấy giá trị từ client và server
+    received_secret = request.headers.get('X-Cron-Secret')
+    server_secret = CRON_SECRET
+
+    # In ra log để debug
+    print(f"--- DEBUGGING 403 ERROR ---")
+    print(f"Secret received from client: '{received_secret}'")
+    print(f"Secret configured on server: '{server_secret}'")
+    print(f"Are they equal? {received_secret == server_secret}")
+    print(f"---------------------------")
+
+    if not all([kv, BOT_TOKEN, CRON_SECRET]): 
+        return jsonify(error="Server not configured"), 500
+    
+    # So sánh lại
+    if received_secret != server_secret: 
+        return jsonify(error="Unauthorized"), 403
     
     events, error = _get_processed_airdrop_events()
     if error or not events:
