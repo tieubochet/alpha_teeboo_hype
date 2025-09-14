@@ -121,7 +121,7 @@ def get_airdrop_events() -> tuple[str, str | None]:
     # --- THÊM DÒNG CHỮ MỚI TẠI ĐÂY ---
     # Chỉ thêm tin nhắn ref khi có sự kiện được hiển thị
     if message_parts:
-        promo_text = "\n\n*ĐĂNG KÝ QUA LINK REF BÊN DƯỚI ĐỂ VỪA HỖ TRỢ MÌNH, VỪA NHẬN THÊM GIẢM 4% PHÍ TRADE CHO BẠN. WIN – WIN CÙNG NHAU!*"
+        promo_text = "\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
         final_message += promo_text
 
     # Tìm token của sự kiện gần nhất
