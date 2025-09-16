@@ -12,8 +12,8 @@ CHINA_TIMEZONE = pytz.timezone('Asia/Shanghai')
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CRON_SECRET = os.getenv("CRON_SECRET")
 REMINDER_THRESHOLD_MINUTES = 5
-FOOTER_MESSAGE = "\n\n-------------------------\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
 
+FOOTER_MESSAGE = "\n\n-------------------------\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
 
 # --- KẾT NỐI CƠ SỞ DỮ LIỆU ---
 try:
@@ -24,9 +24,6 @@ except Exception as e:
     print(f"FATAL: Could not connect to Redis. Error: {e}"); kv = None
 
 # --- LOGIC QUẢN LÝ CÔNG VIỆC ---
-
-# SỬA LỖI: Đã xóa hàm _get_processed_airdrop_events() bị trùng lặp ở trên.
-# Chỉ giữ lại phiên bản hoạt động đúng này.
 def _get_processed_airdrop_events():
     """
     Hàm nội bộ: Lấy và xử lý dữ liệu airdrop, trả về danh sách các sự kiện
@@ -84,40 +81,48 @@ def _get_processed_airdrop_events():
     except requests.RequestException: return None, "❌ Lỗi mạng khi lấy dữ liệu sự kiện."
     except json.JSONDecodeError: return None, "❌ Dữ liệu trả về từ API sự kiện không hợp lệ."
 
-def _get_SIMULATED_airdrop_events():
+def format_event_for_display(event, price_data, effective_dt, include_date=False, include_time=True):
     """
-    HÀM GIẢ LẬP: Tạo ra một sự kiện giả sẽ diễn ra sau 4 phút nữa.
-    Chỉ dùng để kiểm tra cron job.
+    Hàm trợ giúp chung để định dạng một sự kiện thành chuỗi tin nhắn.
+    - include_time: Tùy chọn để ẩn/hiện dòng "Thời gian".
     """
-    print("--- RUNNING IN SIMULATION MODE ---")
+    token, name = event.get('token', 'N/A'), event.get('name', 'N/A')
+    points, amount_str = event.get('points') or '-', event.get('amount') or '-'
     
-    # Tạo thời điểm trong tương lai gần (4 phút kể từ bây giờ)
-    # Điều này đảm bảo nó nằm trong ngưỡng 5 phút của REMINDER_THRESHOLD_MINUTES
-    event_time_vietnam = datetime.now(TIMEZONE) + timedelta(minutes=4)
+    display_time = event.get('time') or 'TBA'
+    is_special_time = "Tomorrow" in display_time or "Day after" in display_time
     
-    # Chuyển đổi về múi giờ Trung Quốc để tạo dữ liệu date/time giả
-    event_time_china = event_time_vietnam.astimezone(CHINA_TIMEZONE)
+    if effective_dt and not is_special_time:
+        time_part = effective_dt.strftime('%H:%M')
+        if include_date:
+            date_part = effective_dt.strftime('%d/%m')
+            display_time = f"{time_part} {date_part}"
+        else:
+            display_time = time_part
     
-    # Tạo một sự kiện giả
-    fake_event = {
-        'token': 'TEST',
-        'name': 'Cron Job Test Event',
-        'points': '100',
-        'amount': '50',
-        'date': event_time_china.strftime('%Y-%m-%d'),
-        'time': event_time_china.strftime('%H:%M'),
-        'phase': 1,
-        'effective_dt': event_time_vietnam, # Thời gian đã được tính toán
-        'price_data': {
-            "TEST": { "price": 1.5 } # Dữ liệu giá giả
-        }
-    }
-    
-    print(f"Simulated event created for time: {event_time_vietnam.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Trả về dữ liệu giống hệt như hàm thật
-    return [fake_event], None
+    time_str = f"`{display_time}`"
 
+    price_display = "N/A"
+    value_line = ""
+    if price_data and token in price_data:
+        price_info = price_data.get(token, {})
+        price_value = price_info.get('dex_price') or price_info.get('price', 0)
+        if price_value > 0:
+            price_display = f"${price_value:,.4f}"
+            try:
+                numeric_amount = float(str(amount_str).replace(',', ''))
+                value = numeric_amount * price_value
+                value_line = f"\n  Giá trị: `${value:,.2f}`"
+            except (ValueError, TypeError): pass
+
+    message = (f"*{name} ({token}): {price_display}*\n"
+               f"  Điểm: `{points}`\n"
+               f"  Số lượng: `{amount_str}`{value_line}")
+    
+    if include_time:
+        message += f"\n  Thời gian: {time_str}"
+        
+    return message
 
 def get_airdrop_events() -> tuple[str, str | None]:
     """
@@ -125,47 +130,11 @@ def get_airdrop_events() -> tuple[str, str | None]:
     Đồng thời trả về token của sự kiện sắp diễn ra gần nhất.
     """
     processed_events, error_message = _get_processed_airdrop_events()
-
-
+    
     if error_message:
         return error_message + FOOTER_MESSAGE, None
     if not processed_events:
         return "ℹ️ Không tìm thấy sự kiện airdrop nào." + FOOTER_MESSAGE, None
-
-    def _format_event_message(event, price_data, effective_dt, include_date=False):
-        token, name = event.get('token', 'N/A'), event.get('name', 'N/A')
-        points, amount_str = event.get('points') or '-', event.get('amount') or '-'
-        
-        display_time = event.get('time') or 'TBA'
-        is_special_time = "Tomorrow" in display_time or "Day after" in display_time
-        
-        if effective_dt and not is_special_time:
-            time_part = effective_dt.strftime('%H:%M')
-            if include_date:
-                date_part = effective_dt.strftime('%d/%m')
-                display_time = f"{time_part} {date_part}"
-            else:
-                display_time = time_part
-        
-        time_str = f"`{display_time}`"
-
-        price_display = "N/A"
-        value_line = ""
-        if price_data and token in price_data:
-            price_info = price_data.get(token, {})
-            price_value = price_info.get('dex_price') or price_info.get('price', 0)
-            if price_value > 0:
-                price_display = f"${price_value:,.4f}"
-                try:
-                    numeric_amount = float(str(amount_str).replace(',', ''))
-                    value = numeric_amount * price_value
-                    value_line = f"\n  Giá trị: `${value:,.2f}`"
-                except (ValueError, TypeError): pass
-
-        return (f"*{name} ({token}): {price_display}*\n"
-                f"  Điểm: `{points}`\n"
-                f"  Số lượng: `{amount_str}`{value_line}\n"
-                f"  Thời gian: {time_str}")
 
     now_vietnam = datetime.now(TIMEZONE)
     today_date = now_vietnam.date()
@@ -174,15 +143,12 @@ def get_airdrop_events() -> tuple[str, str | None]:
     for event in processed_events:
         effective_dt = event['effective_dt']
         if effective_dt and effective_dt < now_vietnam: continue
-        
         event_date_str = event.get('date')
         if not event_date_str: continue
-
         try:
             event_day = effective_dt.date() if effective_dt else datetime.strptime(event_date_str, '%Y-%m-%d').date()
         except ValueError:
             continue
-
         if event_day == today_date:
             todays_events.append(event)
         elif event_day > today_date:
@@ -191,24 +157,22 @@ def get_airdrop_events() -> tuple[str, str | None]:
     todays_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     upcoming_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     
-    # --- LOGIC MỚI: TÌM TOKEN CỦA SỰ KIỆN GẦN NHẤT ---
     next_event_token = None
     if todays_events:
         next_event_token = todays_events[0].get('token')
     elif upcoming_events:
         next_event_token = upcoming_events[0].get('token')
-    # ---------------------------------------------------
 
     message_parts = []
     price_data = processed_events[0]['price_data'] if processed_events else {}
     
     if todays_events:
-        today_messages = [_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]
+        today_messages = [format_event_for_display(e, price_data, e['effective_dt']) for e in todays_events]
         message_parts.append("🎁 *Today's Airdrops:*\n\n" + "\n\n".join(today_messages))
 
     if upcoming_events:
         if message_parts: message_parts.append("\n\n" + "-"*25 + "\n\n")
-        upcoming_messages = [_format_event_message(e, price_data, e['effective_dt'], include_date=True) for e in upcoming_events]
+        upcoming_messages = [format_event_for_display(e, price_data, e['effective_dt'], include_date=True) for e in upcoming_events]
         message_parts.append("🗓️ *Upcoming Airdrops:*\n\n" + "\n\n".join(upcoming_messages))
 
     if not message_parts:
@@ -216,7 +180,6 @@ def get_airdrop_events() -> tuple[str, str | None]:
     else:
         final_message = "".join(message_parts)
 
-    # Thêm footer và trả về cả 2 giá trị
     return final_message + FOOTER_MESSAGE, next_event_token
 
 def send_telegram_message(chat_id, text, **kwargs) -> int | None:
@@ -256,20 +219,15 @@ def webhook():
     if "callback_query" in data:
         cb = data["callback_query"]; answer_callback_query(cb["id"])
         
-        # SỬA LỖI: logic 'refresh_portfolio' cũ đã được ghi chú lại vì hàm của nó không tồn tại
-        # if cb.get("data") == "refresh_portfolio" and "reply_to_message" in cb["message"]:
-        #     result = process_portfolio_text(cb["message"]["reply_to_message"]["text"])
-        #     if result: edit_telegram_message(cb["message"]["chat"]["id"], cb["message"]["message_id"], text=result, reply_markup=cb["message"]["reply_markup"])
-        
-        # logic refresh sự kiện vẫn được giữ lại
         if cb.get("data") == "refresh_events":
-            new_text = get_airdrop_events()
+            result_text, next_token = get_airdrop_events()
             old_text = cb["message"]["text"]
-            if new_text != old_text:
+            
+            if result_text != old_text:
                 edit_telegram_message(
                     chat_id=cb["message"]["chat"]["id"],
                     msg_id=cb["message"]["message_id"],
-                    text=new_text,
+                    text=result_text,
                     reply_markup=json.dumps(cb["message"]["reply_markup"])
                 )
         return jsonify(success=True)
@@ -280,20 +238,17 @@ def webhook():
     msg_id = data["message"]["message_id"]
     text = data["message"]["text"].strip()
     
-    # Chỉ xử lý lệnh
     if text.startswith('/'):
         cmd = text.split()[0].lower()
 
         if cmd == "/start":
             if kv:
-                # SỬA LỖI: Thêm logic đăng ký nhóm vào Redis
                 kv.sadd("event_notification_groups", str(chat_id))
                 start_message = "✅ *Đã bật thông báo!*\n\n🔹 `/alpha` - Xem sự kiện.\n🔹 `/stop` - Tắt thông báo."
             else:
                 start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n🔹 `/alpha` - Xem sự kiện.\n(Lỗi kết nối DB, tính năng thông báo có thể không hoạt động)"
             send_telegram_message(chat_id, text=start_message)
 
-        # SỬA LỖI: Thêm lệnh /stop để hủy đăng ký
         elif cmd == "/stop":
             if kv:
                 kv.srem("event_notification_groups", str(chat_id))
@@ -303,41 +258,23 @@ def webhook():
         elif cmd == '/alpha':
             temp_msg_id = send_telegram_message(chat_id, text="🔍 Đang tìm sự kiện airdrop...", reply_to_message_id=msg_id)
             if temp_msg_id:
-                # Lấy cả nội dung tin nhắn và token của sự kiện tiếp theo
                 result_text, next_token = get_airdrop_events()
                 
-                # --- LOGIC TẠO NÚT BẤM ĐỘNG ---
-                # URL mặc định là link ref chung
                 trade_button_url = "https://app.hyperliquid.xyz/join/TIEUBOCHET"
                 
                 if next_token:
-                    # Nếu có token, tạo text và URL trade trực tiếp cho token đó
                     token_symbol = next_token.upper()
                     trade_button_text = f"🚀 Trade {token_symbol} on Hyperliquid"
-                    trade_button_url = f"https://app.hyperliquid.xyz/join/TIEUBOCHET"
                 else:
-                    # Nếu không có sự kiện nào, giữ text mặc định
                     trade_button_text = "🚀 Trade on Hyperliquid"
 
-                # Tạo bàn phím chỉ với một nút bấm động
                 reply_markup = {
                     'inline_keyboard': [
-                        [
-                            {'text': trade_button_text, 'url': trade_button_url}
-                        ]
+                        [{'text': trade_button_text, 'url': trade_button_url}]
                     ]
                 }
                 
                 edit_telegram_message(chat_id, temp_msg_id, text=result_text, reply_markup=json.dumps(reply_markup))
-    
-    # SỬA LỖI: Ghi chú lại toàn bộ logic xử lý tin nhắn không phải lệnh để tránh lỗi
-    # if len(parts) == 1 and is_crypto_address(parts[0]):
-    #     send_telegram_message(chat_id, text=find_token_across_networks(parts[0]), reply_to_message_id=msg_id, disable_web_page_preview=True)
-    # else:
-    #     portfolio_result = process_portfolio_text(text)
-    #     if portfolio_result:
-    #         refresh_btn = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_portfolio'}]]}
-    #         send_telegram_message(chat_id, text=portfolio_result, reply_to_message_id=msg_id, reply_markup=json.dumps(refresh_btn))
 
     return jsonify(success=True)
 
@@ -351,7 +288,7 @@ def check_events_and_notify_groups():
         return 0
 
     print(f"[{datetime.now()}] Running group event notification check...")
-    events, error = _get_SIMULATED_airdrop_events()
+    events, error = _get_processed_airdrop_events()
     if error or not events:
         print(f"Could not fetch events for notification: {error or 'No events found.'}")
         return 0
@@ -379,33 +316,31 @@ def check_events_and_notify_groups():
 
                     if not kv.exists(redis_key):
                         minutes_left = int(time_until_event.total_seconds() // 60) + 1
-                        token, name = event.get('token', 'N/A'), event.get('name', 'N/A')
+                        token = event.get('token', 'N/A')
                         
+                        detailed_event_info = format_event_for_display(
+                            event, event['price_data'], event['effective_dt'], include_time=False
+                        )
+
                         message = (f"‼️ *THÔNG BÁO*‼️\n\n"
-                                   f"Sự kiện: *{name} ({token})*\n"
+                                   f"Sự kiện:\n{detailed_event_info}\n\n"
                                    f"sẽ diễn ra trong vòng *{minutes_left} phút* nữa."
                                    f"{FOOTER_MESSAGE}")
                         
-                        # --- TẠO NÚT BẤM ĐỘNG CHO THÔNG BÁO ---
-                        # Logic này được sao chép từ hàm webhook để đảm bảo tính nhất quán
                         token_symbol = token.upper()
                         trade_button_text = f"🚀 Trade {token_symbol} on Hyperliquid"
                         trade_button_url = "https://app.hyperliquid.xyz/join/TIEUBOCHET"
 
                         reply_markup = {
                             'inline_keyboard': [
-                                [
-                                    {'text': trade_button_text, 'url': trade_button_url}
-                                ]
+                                [{'text': trade_button_text, 'url': trade_button_url}]
                             ]
                         }
-                        # ----------------------------------------------
                         
-                        # Gửi tin nhắn KÈM THEO NÚT BẤM
                         sent_message_id = send_telegram_message(
                             chat_id, 
                             text=message,
-                            reply_markup=json.dumps(reply_markup) # Thêm tham số này
+                            reply_markup=json.dumps(reply_markup)
                         )
                         
                         if sent_message_id:
@@ -418,9 +353,6 @@ def check_events_and_notify_groups():
 
 @app.route('/check_events', methods=['POST'])
 def cron_webhook():
-    # SỬA LỖI LOGIC NGHIÊM TRỌNG:
-    # Endpoint này bây giờ sẽ gọi đúng hàm check_events_and_notify_groups()
-    # thay vì logic nhắc nhở cá nhân cũ.
     if not kv or not BOT_TOKEN or not CRON_SECRET: return jsonify(error="Server not configured"), 500
     
     secret = request.headers.get('X-Cron-Secret')
