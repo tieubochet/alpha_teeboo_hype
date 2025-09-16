@@ -120,9 +120,11 @@ def get_airdrop_events() -> str:
                 except (ValueError, TypeError): pass
         
         time_str = f"`{display_time}`"
-        return (f"*{token} - {name}*{price_str}\n"
-                f"  Points: `{points}` | Amount: `{amount_str}`{value_str}\n"
-                f"  Time: {time_str}")
+        return (f"*{name} {(token)}\n"
+                f" Points: `{points}`\n"
+                f"  Giá: {price_str}\n"
+                f"  Số lượng: `{amount_str}`{value_str}\n"
+                f"  Thời gian: {time_str}")
 
     now_vietnam = datetime.now(TIMEZONE)
     today_date = now_vietnam.date()
@@ -153,12 +155,12 @@ def get_airdrop_events() -> str:
     
     if todays_events:
         today_messages = [_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]
-        message_parts.append("🎁 *Today's Airdrops:*\n\n" + "\n\n".join(today_messages))
+        message_parts.append("🎁 *Airdrops Hôm nay:*\n\n" + "\n\n".join(today_messages))
 
     if upcoming_events:
         if message_parts: message_parts.append("\n\n" + "-"*25 + "\n\n")
         upcoming_messages = [_format_event_message(e, price_data, e['effective_dt'], include_date=True) for e in upcoming_events]
-        message_parts.append("🗓️ *Upcoming Airdrops:*\n\n" + "\n\n".join(upcoming_messages))
+        message_parts.append("🗓️ *Airdrops Sắp tới:*\n\n" + "\n\n".join(upcoming_messages))
 
     if not message_parts:
         return "ℹ️ Không có sự kiện airdrop nào đáng chú ý trong hôm nay và các ngày sắp tới."
@@ -234,7 +236,7 @@ def webhook():
             if kv:
                 # SỬA LỖI: Thêm logic đăng ký nhóm vào Redis
                 kv.sadd("event_notification_groups", str(chat_id))
-                start_message = "✅ *Đã bật thông báo sự kiện Airdrop Alpha cho nhóm này!*\n\n🔹 `/alpha` - Xem sự kiện.\n🔹 `/stop` - Tắt thông báo."
+                start_message = "✅ *Đã bật thông báo!*\n\n🔹 `/alpha` - Xem sự kiện.\n🔹 `/stop` - Tắt thông báo."
             else:
                 start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n🔹 `/alpha` - Xem sự kiện.\n(Lỗi kết nối DB, tính năng thông báo có thể không hoạt động)"
             send_telegram_message(chat_id, text=start_message)
@@ -243,7 +245,7 @@ def webhook():
         elif cmd == "/stop":
             if kv:
                 kv.srem("event_notification_groups", str(chat_id))
-                stop_message = "❌ *Đã tắt thông báo sự kiện Airdrop Alpha cho nhóm này.*"
+                stop_message = "❌ *Đã tắt thông báo!*"
                 send_telegram_message(chat_id, text=stop_message)
 
         elif cmd == '/alpha':
