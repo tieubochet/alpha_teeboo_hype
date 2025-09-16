@@ -83,15 +83,20 @@ def _get_processed_airdrop_events():
     except requests.RequestException: return None, "❌ Lỗi mạng khi lấy dữ liệu sự kiện."
     except json.JSONDecodeError: return None, "❌ Dữ liệu trả về từ API sự kiện không hợp lệ."
 
-def get_airdrop_events() -> str:
+def get_airdrop_events() -> tuple[str, str | None]:
     """
     Hàm giao diện: Gọi hàm logic cốt lõi và định dạng kết quả thành tin nhắn cho người dùng.
+    Đồng thời trả về token của sự kiện sắp diễn ra gần nhất.
     """
     processed_events, error_message = _get_processed_airdrop_events()
+    
+    # Định nghĩa footer message
+    footer_message = "\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
+
     if error_message:
-        return error_message
+        return error_message + footer_message, None
     if not processed_events:
-        return "ℹ️ Không tìm thấy sự kiện airdrop nào."
+        return "ℹ️ Không tìm thấy sự kiện airdrop nào." + footer_message, None
 
     def _format_event_message(event, price_data, effective_dt, include_date=False):
         token, name = event.get('token', 'N/A'), event.get('name', 'N/A')
@@ -110,24 +115,19 @@ def get_airdrop_events() -> str:
         
         time_str = f"`{display_time}`"
 
-        # --- Logic mới để định dạng giá và giá trị ---
         price_display = "N/A"
-        value_line = "" # Dòng này sẽ chứa tổng giá trị (nếu có)
+        value_line = ""
         if price_data and token in price_data:
             price_info = price_data.get(token, {})
             price_value = price_info.get('dex_price') or price_info.get('price', 0)
             if price_value > 0:
                 price_display = f"${price_value:,.4f}"
                 try:
-                    # Chuyển đổi amount thành số để tính toán
                     numeric_amount = float(str(amount_str).replace(',', ''))
                     value = numeric_amount * price_value
-                    # Tạo dòng "Giá trị" bằng tiếng Việt
                     value_line = f"\n  Giá trị: `${value:,.2f}`"
-                except (ValueError, TypeError):
-                    pass # Bỏ qua nếu 'amount' không phải là số
+                except (ValueError, TypeError): pass
 
-        # --- ÁP DỤNG ĐỊNH DẠNG MỚI THEO YÊU CẦU ---
         return (f"*{name} ({token})*\n"
                 f"  Points: `{points}`\n"
                 f"  Giá: `{price_display}`\n"
@@ -158,22 +158,33 @@ def get_airdrop_events() -> str:
     todays_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     upcoming_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     
+    # --- LOGIC MỚI: TÌM TOKEN CỦA SỰ KIỆN GẦN NHẤT ---
+    next_event_token = None
+    if todays_events:
+        next_event_token = todays_events[0].get('token')
+    elif upcoming_events:
+        next_event_token = upcoming_events[0].get('token')
+    # ---------------------------------------------------
+
     message_parts = []
     price_data = processed_events[0]['price_data'] if processed_events else {}
     
     if todays_events:
         today_messages = [_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]
-        message_parts.append("🎁 *Airdrops Hôm nay:*\n\n" + "\n\n".join(today_messages))
+        message_parts.append("🎁 *Today's Airdrops:*\n\n" + "\n\n".join(today_messages))
 
     if upcoming_events:
         if message_parts: message_parts.append("\n\n" + "-"*25 + "\n\n")
         upcoming_messages = [_format_event_message(e, price_data, e['effective_dt'], include_date=True) for e in upcoming_events]
-        message_parts.append("🗓️ *Airdrops Sắp tới:*\n\n" + "\n\n".join(upcoming_messages))
+        message_parts.append("🗓️ *Upcoming Airdrops:*\n\n" + "\n\n".join(upcoming_messages))
 
     if not message_parts:
-        return "ℹ️ Không có sự kiện airdrop nào đáng chú ý trong hôm nay và các ngày sắp tới."
-    
-    return "".join(message_parts)
+        final_message = "ℹ️ Không có sự kiện airdrop nào đáng chú ý trong hôm nay và các ngày sắp tới."
+    else:
+        final_message = "".join(message_parts)
+
+    # Thêm footer và trả về cả 2 giá trị
+    return final_message + footer_message, next_event_token
 
 def send_telegram_message(chat_id, text, **kwargs) -> int | None:
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -259,16 +270,32 @@ def webhook():
         elif cmd == '/alpha':
             temp_msg_id = send_telegram_message(chat_id, text="🔍 Đang tìm sự kiện airdrop...", reply_to_message_id=msg_id)
             if temp_msg_id:
-                result = get_airdrop_events()
+                # Lấy cả nội dung tin nhắn và token của sự kiện tiếp theo
+                result_text, next_token = get_airdrop_events()
+                
+                # --- LOGIC TẠO NÚT BẤM ĐỘNG ---
+                # URL mặc định là link ref chung
+                trade_button_url = "https://app.hyperliquid.xyz/join/TIEUBOCHET"
+                
+                if next_token:
+                    # Nếu có token, tạo text và URL trade trực tiếp cho token đó
+                    token_symbol = next_token.upper()
+                    trade_button_text = f"🚀 Trade {token_symbol} on Hyperliquid"
+                    trade_button_url = f"https://app.hyperliquid.xyz/join/TIEUBOCHET"
+                else:
+                    # Nếu không có sự kiện nào, giữ text mặc định
+                    trade_button_text = "🚀 Trade on Hyperliquid"
+
+                # Tạo bàn phím chỉ với một nút bấm động
                 reply_markup = {
                     'inline_keyboard': [
                         [
-                            {'text': '🔄 Tải lại', 'callback_data': 'refresh_events'},
-                            {'text': '🚀 Trade on Hyperliquid', 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}
+                            {'text': trade_button_text, 'url': trade_button_url}
                         ]
                     ]
                 }
-                edit_telegram_message(chat_id, temp_msg_id, text=result, reply_markup=json.dumps(reply_markup))
+                
+                edit_telegram_message(chat_id, temp_msg_id, text=result_text, reply_markup=json.dumps(reply_markup))
     
     # SỬA LỖI: Ghi chú lại toàn bộ logic xử lý tin nhắn không phải lệnh để tránh lỗi
     # if len(parts) == 1 and is_crypto_address(parts[0]):
