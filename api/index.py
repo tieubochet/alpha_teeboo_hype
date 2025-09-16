@@ -11,7 +11,7 @@ TIMEZONE = pytz.timezone('Asia/Ho_Chi_Minh')
 CHINA_TIMEZONE = pytz.timezone('Asia/Shanghai')
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CRON_SECRET = os.getenv("CRON_SECRET")
-REMINDER_THRESHOLD_MINUTES = 5
+REMINDER_THRESHOLD_MINUTES = 10
 
 FOOTER_MESSAGE = "\n\n-------------------------\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
 
