@@ -249,7 +249,7 @@ def webhook():
                 start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n🔹 `/alpha` - Xem sự kiện.\n(Lỗi kết nối DB, tính năng thông báo có thể không hoạt động)"
             send_telegram_message(chat_id, text=start_message)
 
-        elif cmd == "/stop":
+        elif cmd == "/stop": 
             if kv:
                 kv.srem("event_notification_groups", str(chat_id))
                 stop_message = "❌ *Đã tắt thông báo!*"
