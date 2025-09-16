@@ -122,7 +122,7 @@ def get_airdrop_events() -> str:
         time_str = f"`{display_time}`"
         return (f"*{name} {(token)}\n"
                 f" Points: `{points}`\n"
-                f"  Giá: {price_str}\n"
+                f"  Giá: `{price_str}`\n"
                 f"  Số lượng: `{amount_str}`{value_str}\n"
                 f"  Thời gian: {time_str}")
 
