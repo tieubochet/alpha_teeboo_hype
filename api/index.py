@@ -12,6 +12,7 @@ CHINA_TIMEZONE = pytz.timezone('Asia/Shanghai')
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CRON_SECRET = os.getenv("CRON_SECRET")
 REMINDER_THRESHOLD_MINUTES = 5
+FOOTER_MESSAGE = "\n\n-------------------------\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
 
 
 # --- KẾT NỐI CƠ SỞ DỮ LIỆU ---
@@ -82,39 +83,6 @@ def _get_processed_airdrop_events():
         return airdrops, None
     except requests.RequestException: return None, "❌ Lỗi mạng khi lấy dữ liệu sự kiện."
     except json.JSONDecodeError: return None, "❌ Dữ liệu trả về từ API sự kiện không hợp lệ."
-def _get_SIMULATED_airdrop_events():
-    """
-    HÀM GIẢ LẬP: Tạo ra một sự kiện giả sẽ diễn ra sau 4 phút nữa.
-    Chỉ dùng để kiểm tra cron job.
-    """
-    print("--- RUNNING IN SIMULATION MODE ---")
-    
-    # Tạo thời điểm trong tương lai gần (4 phút kể từ bây giờ)
-    # Điều này đảm bảo nó nằm trong ngưỡng 5 phút của REMINDER_THRESHOLD_MINUTES
-    event_time_vietnam = datetime.now(TIMEZONE) + timedelta(minutes=4)
-    
-    # Chuyển đổi về múi giờ Trung Quốc để tạo dữ liệu date/time giả
-    event_time_china = event_time_vietnam.astimezone(CHINA_TIMEZONE)
-    
-    # Tạo một sự kiện giả
-    fake_event = {
-        'token': 'TEST',
-        'name': 'Cron Job Test Event',
-        'points': '100',
-        'amount': '50',
-        'date': event_time_china.strftime('%Y-%m-%d'),
-        'time': event_time_china.strftime('%H:%M'),
-        'phase': 1,
-        'effective_dt': event_time_vietnam, # Thời gian đã được tính toán
-        'price_data': {
-            "TEST": { "price": 1.5 } # Dữ liệu giá giả
-        }
-    }
-    
-    print(f"Simulated event created for time: {event_time_vietnam.strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Trả về dữ liệu giống hệt như hàm thật
-    return [fake_event], None
 
 def get_airdrop_events() -> tuple[str, str | None]:
     """
@@ -122,14 +90,12 @@ def get_airdrop_events() -> tuple[str, str | None]:
     Đồng thời trả về token của sự kiện sắp diễn ra gần nhất.
     """
     processed_events, error_message = _get_processed_airdrop_events()
-    
-    # Định nghĩa footer message
-    footer_message = "\n\n-------------------------\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
+
 
     if error_message:
-        return error_message + footer_message, None
+        return error_message + FOOTER_MESSAGE, None
     if not processed_events:
-        return "ℹ️ Không tìm thấy sự kiện airdrop nào." + footer_message, None
+        return "ℹ️ Không tìm thấy sự kiện airdrop nào." + FOOTER_MESSAGE, None
 
     def _format_event_message(event, price_data, effective_dt, include_date=False):
         token, name = event.get('token', 'N/A'), event.get('name', 'N/A')
@@ -216,7 +182,7 @@ def get_airdrop_events() -> tuple[str, str | None]:
         final_message = "".join(message_parts)
 
     # Thêm footer và trả về cả 2 giá trị
-    return final_message + footer_message, next_event_token
+    return final_message + FOOTER_MESSAGE, next_event_token
 
 def send_telegram_message(chat_id, text, **kwargs) -> int | None:
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -350,7 +316,7 @@ def check_events_and_notify_groups():
         return 0
 
     print(f"[{datetime.now()}] Running group event notification check...")
-    events, error = _get_SIMULATED_airdrop_events()
+    events, error = _get_processed_airdrop_events()
     if error or not events:
         print(f"Could not fetch events for notification: {error or 'No events found.'}")
         return 0
@@ -382,14 +348,35 @@ def check_events_and_notify_groups():
                         
                         message = (f"‼️ *THÔNG BÁO*‼️\n\n"
                                    f"Sự kiện: *{name} ({token})*\n"
-                                   f"sẽ diễn ra trong vòng *{minutes_left} phút* nữa.")
+                                   f"sẽ diễn ra trong vòng *{minutes_left} phút* nữa."
+                                   f"{FOOTER_MESSAGE}")
                         
-                        sent_message_id = send_telegram_message(chat_id, text=message)
+                        # --- TẠO NÚT BẤM ĐỘNG CHO THÔNG BÁO ---
+                        # Logic này được sao chép từ hàm webhook để đảm bảo tính nhất quán
+                        token_symbol = token.upper()
+                        trade_button_text = f"🚀 Trade {token_symbol} on Hyperliquid"
+                        trade_button_url = "https://app.hyperliquid.xyz/join/TIEUBOCHET"
+
+                        reply_markup = {
+                            'inline_keyboard': [
+                                [
+                                    {'text': trade_button_text, 'url': trade_button_url}
+                                ]
+                            ]
+                        }
+                        # ----------------------------------------------
+                        
+                        # Gửi tin nhắn KÈM THEO NÚT BẤM
+                        sent_message_id = send_telegram_message(
+                            chat_id, 
+                            text=message,
+                            reply_markup=json.dumps(reply_markup) # Thêm tham số này
+                        )
                         
                         if sent_message_id:
                             pin_telegram_message(chat_id, sent_message_id)
                             notifications_sent += 1
-                            kv.set(redis_key, "1", ex=3600) # Đánh dấu đã thông báo, tự xóa sau 1 giờ
+                            kv.set(redis_key, "1", ex=3600)
 
     print(f"Group event notification check finished. Sent: {notifications_sent} notifications.")
     return notifications_sent
