@@ -108,22 +108,30 @@ def get_airdrop_events() -> str:
             else:
                 display_time = time_part
         
-        price_str, value_str = "", ""
+        time_str = f"`{display_time}`"
+
+        # --- Logic mới để định dạng giá và giá trị ---
+        price_display = "N/A"
+        value_line = "" # Dòng này sẽ chứa tổng giá trị (nếu có)
         if price_data and token in price_data:
             price_info = price_data.get(token, {})
             price_value = price_info.get('dex_price') or price_info.get('price', 0)
             if price_value > 0:
-                price_str = f" (`${price_value:,.4f}`)"
+                price_display = f"${price_value:,.4f}"
                 try:
-                    value = float(str(amount_str).replace(',', '')) * price_value
-                    value_str = f"\n  Value: `${value:,.2f}`"
-                except (ValueError, TypeError): pass
-        
-        time_str = f"`{display_time}`"
-        return (f"*{name} {(token)}\n"
-                f" Points: `{points}`\n"
-                f"  Giá: `{price_str}`\n"
-                f"  Số lượng: `{amount_str}`{value_str}\n"
+                    # Chuyển đổi amount thành số để tính toán
+                    numeric_amount = float(str(amount_str).replace(',', ''))
+                    value = numeric_amount * price_value
+                    # Tạo dòng "Giá trị" bằng tiếng Việt
+                    value_line = f"\n  Giá trị: `${value:,.2f}`"
+                except (ValueError, TypeError):
+                    pass # Bỏ qua nếu 'amount' không phải là số
+
+        # --- ÁP DỤNG ĐỊNH DẠNG MỚI THEO YÊU CẦU ---
+        return (f"*{name} ({token})*\n"
+                f"  Points: `{points}`\n"
+                f"  Giá: `{price_display}`\n"
+                f"  Số lượng: `{amount_str}`{value_line}\n"
                 f"  Thời gian: {time_str}")
 
     now_vietnam = datetime.now(TIMEZONE)

@@ -1,4 +1,4 @@
-# Real-time tracking of Binance Alpha project airdrops Bot
+# Real-time tracking of Binance Alpha Airdrops
 
 This is a Python-based Telegram bot that fetches and displays upcoming crypto airdrop events. It is built with Flask and designed for easy deployment on Vercel.
 
