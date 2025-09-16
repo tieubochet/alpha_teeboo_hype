@@ -45,7 +45,9 @@ def _get_processed_airdrop_events():
     def _filter_and_deduplicate_events(events):
         processed = {}
         for event in events:
-            key = (event.get('date'), event.get('token'))
+            # --- SỬA LỖI 1: Làm cho khóa (key) chống trùng lặp cụ thể hơn ---
+            # Thêm cả 'time' vào key để phân biệt các sự kiện trong cùng một ngày.
+            key = (event.get('date'), event.get('token'), event.get('time'))
             if key not in processed or event.get('phase', 1) > processed[key].get('phase', 1):
                 processed[key] = event
         return list(processed.values())
@@ -56,7 +58,12 @@ def _get_processed_airdrop_events():
         try:
             cleaned_time_str = event_time_str.strip().split()[0]
             naive_dt = datetime.strptime(f"{event_date_str} {cleaned_time_str}", '%Y-%m-%d %H:%M')
-            if event.get('phase') == 2: naive_dt += timedelta(hours=18)
+            
+            # --- SỬA LỖI 2: Sửa logic tính giờ cho Phase 2 ---
+            # Thay vì CỘNG THÊM 18 giờ, chúng ta THIẾT LẬP giờ thành 18:00.
+            if event.get('phase') == 2:
+                naive_dt = naive_dt.replace(hour=18, minute=0, second=0, microsecond=0)
+
             return CHINA_TIMEZONE.localize(naive_dt).astimezone(TIMEZONE)
         except (ValueError, pytz.exceptions.PyTZError): return None
 
@@ -94,13 +101,13 @@ def get_airdrop_events() -> tuple[str, str | None]:
                 price_str = f" (`${price_value:,.4f}`)"
                 try: value_str = f"\n  Value: `${float(amount_str) * price_value:,.2f}`"
                 except (ValueError, TypeError): pass
-        return f"*{name} ({token})*{price_str}\n  Điểm: `{points}` \n  Số lượng: `{amount_str}`{value_str}\n  Thời gian: `{display_time}`"
+        return f"*{name}  ({token})*{price_str}\n  Điểm: `{points}` \n  Số lượng: `{amount_str}`{value_str}\n  Thời gian: `{display_time}`"
 
     now_vietnam = datetime.now(TIMEZONE)
     today_date = now_vietnam.date()
     todays_events, upcoming_events = [], []
     for event in processed_events:
-        effective_dt = event.get('effective_dt')
+        effective_dt = event['effective_dt']
         if effective_dt and effective_dt < now_vietnam: continue
         try: event_day = effective_dt.date() if effective_dt else datetime.strptime(event.get('date'), '%Y-%m-%d').date()
         except (ValueError, TypeError): continue
@@ -111,29 +118,25 @@ def get_airdrop_events() -> tuple[str, str | None]:
     upcoming_events.sort(key=lambda x: x.get('effective_dt') or datetime.max.replace(tzinfo=TIMEZONE))
     
     message_parts, price_data = [], processed_events[0]['price_data'] if processed_events else {}
-    if todays_events: message_parts.append("\n🎁 *Airdrops Hôm Nay:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]))
+    if todays_events: message_parts.append("🎁 *Airdrops Hôm Nay:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt']) for e in todays_events]))
     if upcoming_events:
         if message_parts: message_parts.append("\n\n" + "-"*25 + "\n\n")
-        message_parts.append("\n🗓️ *Airdrops Sắp Tới:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt'], True) for e in upcoming_events]))
+        message_parts.append("🗓️ *Airdrops Sắp Tới:*\n\n" + "\n\n".join([_format_event_message(e, price_data, e['effective_dt'], True) for e in upcoming_events]))
     
     final_message = "".join(message_parts) if message_parts else "ℹ️ Không có sự kiện nào sắp tới."
     
-    # --- THÊM DÒNG CHỮ MỚI TẠI ĐÂY ---
-    # Chỉ thêm tin nhắn ref khi có sự kiện được hiển thị
     if message_parts:
-        promo_text = "\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
+        promo_text = "\n\n*Nếu bạn thấy bot hữu ích, xin hãy cho tôi 1 link ref bằng cách ấn vào link bên dưới:*"
         final_message += promo_text
 
-    # Tìm token của sự kiện gần nhất
     next_event_token = None
-    if todays_events:
-        next_event_token = todays_events[0].get('token')
-    elif upcoming_events:
-        next_event_token = upcoming_events[0].get('token')
+    all_future_events = todays_events + upcoming_events
+    if all_future_events:
+        next_event_token = all_future_events[0].get('token')
 
     return final_message, next_event_token
 
-# --- HÀM HỖ TRỢ TELEGRAM ---
+# --- HÀM HỖ TRỢ TELEGRAM (Giữ nguyên) ---
 def send_telegram_message(chat_id, text, **kwargs):
     if not BOT_TOKEN: return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -156,7 +159,7 @@ def answer_callback_query(cb_id):
     if not BOT_TOKEN: return
     requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", json={'callback_query_id': cb_id}, timeout=5)
 
-# --- WEB SERVER (FLASK) ---
+# --- WEB SERVER (FLASK) (Giữ nguyên) ---
 app = Flask(__name__)
 
 @app.route('/', methods=['GET', 'POST'])
@@ -177,7 +180,7 @@ def telegram_webhook():
             if next_token:
                 button_text = f'🚀 Trade {next_token.upper()} on Hyperliquid'
 
-            new_reply_markup = {'inline_keyboard': [[{'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
+            new_reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
             
             if new_text != cb["message"]["text"] or json.dumps(new_reply_markup) != json.dumps(cb["message"].get("reply_markup")):
                 edit_telegram_message(
@@ -195,7 +198,7 @@ def telegram_webhook():
     cmd = message["text"].strip().split()[0].lower()
 
     if cmd == '/start':
-        start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n`/alpha` - Xem sự kiện.\n`/stop` - Dừng bot & tắt thông báo."
+        start_message = "Bot Airdrop Alpha đã sẵn sàng!\n\n🔹 `/alpha` - Xem sự kiện.\n🔹 `/stop` - Tắt thông báo."
         send_telegram_message(chat_id, text=start_message)
         if kv:
             kv.sadd("event_notification_groups", str(chat_id))
@@ -219,41 +222,35 @@ def telegram_webhook():
             if next_token:
                 button_text = f'🚀 Trade {next_token.upper()} on Hyperliquid'
             
-            reply_markup = {'inline_keyboard': [[{'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
+            reply_markup = {'inline_keyboard': [[{'text': '🔄 Refresh', 'callback_data': 'refresh_events'}, {'text': button_text, 'url': 'https://app.hyperliquid.xyz/join/TIEUBOCHET'}]]}
             edit_telegram_message(chat_id, temp_msg_id, text=result, reply_markup=json.dumps(reply_markup))
     
     return jsonify(success=True)
 
 @app.route('/check_events', methods=['POST'])
 def cron_job_handler():
-    # --- Phần xác thực giữ nguyên ---
     if not all([kv, BOT_TOKEN, CRON_SECRET]): 
         return jsonify(error="Server not configured"), 500
     if request.headers.get('X-Cron-Secret') != CRON_SECRET: 
         return jsonify(error="Unauthorized"), 403
     
-    # --- LOGIC GIẢ LẬP VÀ TEST ---
-    real_now = datetime.now(TIMEZONE) # Luôn lấy thời gian thật
-    now = real_now # Mặc định 'now' để xử lý là thời gian thật
+    real_now = datetime.now(TIMEZONE)
+    now = real_now
     
     is_test_mode = request.args.get('test_next_event') == 'true'
     fake_time_str = request.args.get('fake_time')
 
     if is_test_mode:
         print(f"--- TEST MODE ACTIVATED ---")
-        # Chế độ test này sẽ ghi đè lên fake_time nếu có
         events, error = _get_processed_airdrop_events()
         if not error and events:
-            # Tìm sự kiện gần nhất trong tương lai
             future_events = sorted(
                 [e for e in events if e.get('effective_dt') and e.get('effective_dt') > real_now],
                 key=lambda x: x['effective_dt']
             )
-            
             if future_events:
                 next_event = future_events[0]
                 event_time = next_event.get('effective_dt')
-                # Giả lập 'now' là 4 phút trước khi sự kiện diễn ra
                 now = event_time - timedelta(minutes=4)
                 print(f"Found next event: {next_event.get('token')} at {event_time.isoformat()}")
                 print(f"SUCCESS: Simulating current time as: {now.isoformat()}")
@@ -272,9 +269,7 @@ def cron_job_handler():
             print(f"WARNING: Invalid fake_time format. Falling back to real time.")
     else:
         print(f"Using real time: {now.isoformat()}")
-    # --- KẾT THÚC LOGIC GIẢ LẬP ---
 
-    # --- Phần logic chính của Cron Job giữ nguyên ---
     events, error = _get_processed_airdrop_events()
     if error or not events:
         print(f"Cron: Could not fetch events: {error or 'No events found.'}")
