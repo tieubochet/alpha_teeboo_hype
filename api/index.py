@@ -81,6 +81,40 @@ def _get_processed_airdrop_events():
     except requests.RequestException: return None, "❌ Lỗi mạng khi lấy dữ liệu sự kiện."
     except json.JSONDecodeError: return None, "❌ Dữ liệu trả về từ API sự kiện không hợp lệ."
 
+def _get_SIMULATED_airdrop_events():
+    """
+    HÀM GIẢ LẬP: Tạo ra một sự kiện giả sẽ diễn ra sau 4 phút nữa.
+    Chỉ dùng để kiểm tra cron job.
+    """
+    print("--- RUNNING IN SIMULATION MODE ---")
+    
+    # Tạo thời điểm trong tương lai gần (4 phút kể từ bây giờ)
+    # Điều này đảm bảo nó nằm trong ngưỡng 5 phút của REMINDER_THRESHOLD_MINUTES
+    event_time_vietnam = datetime.now(TIMEZONE) + timedelta(minutes=4)
+    
+    # Chuyển đổi về múi giờ Trung Quốc để tạo dữ liệu date/time giả
+    event_time_china = event_time_vietnam.astimezone(CHINA_TIMEZONE)
+    
+    # Tạo một sự kiện giả với đầy đủ thông tin
+    fake_event = {
+        'token': 'TEST',
+        'name': 'Cron Job Test Event',
+        'points': '999',
+        'amount': '123',
+        'date': event_time_china.strftime('%Y-%m-%d'),
+        'time': event_time_china.strftime('%H:%M'),
+        'phase': 1,
+        'effective_dt': event_time_vietnam, # Thời gian đã được tính toán
+        'price_data': {
+            "TEST": { "price": 10.0 } # Dữ liệu giá giả
+        }
+    }
+    
+    print(f"Simulated event created for time: {event_time_vietnam.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Trả về dữ liệu giống hệt như hàm thật
+    return [fake_event], None
+
 def format_event_for_display(event, price_data, effective_dt, include_date=False, include_time=True):
     """
     Hàm trợ giúp chung để định dạng một sự kiện thành chuỗi tin nhắn.
@@ -288,7 +322,7 @@ def check_events_and_notify_groups():
         return 0
 
     print(f"[{datetime.now()}] Running group event notification check...")
-    events, error = _get_processed_airdrop_events()
+    events, error = _get_SIMULATED_airdrop_events()
     if error or not events:
         print(f"Could not fetch events for notification: {error or 'No events found.'}")
         return 0
