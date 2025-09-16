@@ -353,49 +353,6 @@ def check_events_and_notify_groups():
 
 @app.route('/check_events', methods=['POST'])
 def cron_webhook():
-
-    # Đoạn code này sẽ in các giá trị ra Vercel Logs để kiểm tra.
-    print("--- [CRON JOB DEBUG] Bắt đầu kiểm tra ---")
-    
-    # 1. Kiểm tra các biến môi trường được nạp từ Vercel
-    bot_token_env = os.getenv("TELEGRAM_TOKEN")
-    cron_secret_env = os.getenv("CRON_SECRET")
-    redis_url_env = os.getenv("REDIS_URL")
-
-    # Kiểm tra BOT_TOKEN
-    print(f"[ENV] TELEGRAM_TOKEN có tồn tại không? -> {bool(bot_token_env)}")
-    if bot_token_env:
-        print(f"    Giá trị (đã che): {bot_token_env[:10]}...{bot_token_env[-4:]}")
-
-    # Kiểm tra CRON_SECRET
-    print(f"[ENV] CRON_SECRET có tồn tại không? -> {bool(cron_secret_env)}")
-    if cron_secret_env:
-        print(f"    Giá trị (đã che): {cron_secret_env[:5]}...{cron_secret_env[-4:]}")
-        
-    # Kiểm tra REDIS_URL
-    print(f"[ENV] REDIS_URL có tồn tại không? -> {bool(redis_url_env)}")
-    if redis_url_env:
-        try:
-            host_part = redis_url_env.split('@')[-1]
-            print(f"    Host của Redis: ...@{host_part}")
-        except:
-            print("    Giá trị (không thể phân tích): REDIS_URL có vẻ không hợp lệ.")
-
-    # 2. Kiểm tra header được gửi từ Vercel Cron Job
-    incoming_secret = request.headers.get('X-Cron-Secret')
-    print(f"[HEADER] Cron Job có gửi header 'X-Cron-Secret' không? -> {bool(incoming_secret)}")
-    if incoming_secret:
-        print(f"    Giá trị nhận được (đã che): {incoming_secret[:5]}...{incoming_secret[-4:]}")
-
-    # 3. So sánh hai giá trị secret một cách rõ ràng
-    if cron_secret_env and incoming_secret:
-        secrets_match = (incoming_secret == cron_secret_env)
-        print(f"[SO SÁNH] Secret từ Vercel có khớp với Secret trong code không? -> {secrets_match}")
-    else:
-        print("[SO SÁNH] Không thể so sánh vì một trong hai secret bị thiếu.")
-        
-    print("--- [CRON JOB DEBUG] Kết thúc kiểm tra ---")
-
     
     if not kv or not BOT_TOKEN or not CRON_SECRET:
         return jsonify(error="Server not configured"), 500
