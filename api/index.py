@@ -91,7 +91,7 @@ def get_airdrop_events() -> tuple[str, str | None]:
     processed_events, error_message = _get_processed_airdrop_events()
     
     # Định nghĩa footer message
-    footer_message = "\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
+    footer_message = "\n\n-------------------------\n\n*Đăng ký qua link ref bên dưới để vừa hỗ trợ mình, vừa nhận thêm GIẢM 4% PHÍ trade cho bạn. Win – Win cùng nhau!*"
 
     if error_message:
         return error_message + footer_message, None
@@ -128,7 +128,7 @@ def get_airdrop_events() -> tuple[str, str | None]:
                     value_line = f"\n  Giá trị: `${value:,.2f}`"
                 except (ValueError, TypeError): pass
 
-        return (f"*{name} ({token}): `{price_display}`*\n"
+        return (f"*{name} ({token}): {price_display}*\n"
                 f"  Điểm: `{points}`\n"
                 f"  Số lượng: `{amount_str}`{value_line}\n"
                 f"  Thời gian: {time_str}")
