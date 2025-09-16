@@ -397,10 +397,13 @@ def cron_webhook():
     print("--- [CRON JOB DEBUG] Kết thúc kiểm tra ---")
 
     
-    if not kv or not BOT_TOKEN or not CRON_SECRET: return jsonify(error="Server not configured"), 500
+    if not kv or not BOT_TOKEN or not CRON_SECRET:
+        return jsonify(error="Server not configured"), 500
     
-    secret = request.headers.get('X-Cron-Secret')
+    secret = request.headers.get('X-Cron-Secret') or (request.is_json and request.get_json().get('secret'))
     if secret != CRON_SECRET: return jsonify(error="Unauthorized"), 403
+
+    
     
     notifications_sent = check_events_and_notify_groups()
     
