@@ -128,9 +128,8 @@ def get_airdrop_events() -> tuple[str, str | None]:
                     value_line = f"\n  Giá trị: `${value:,.2f}`"
                 except (ValueError, TypeError): pass
 
-        return (f"*{name} ({token})*\n"
-                f"  Points: `{points}`\n"
-                f"  Giá: `{price_display}`\n"
+        return (f"*{name} ({token}): `{price_display}`*\n"
+                f"  Điểm: `{points}`\n"
                 f"  Số lượng: `{amount_str}`{value_line}\n"
                 f"  Thời gian: {time_str}")
 
