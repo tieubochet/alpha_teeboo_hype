@@ -168,12 +168,12 @@ def get_airdrop_events() -> tuple[str, str | None]:
     
     if todays_events:
         today_messages = [format_event_for_display(e, price_data, e['effective_dt']) for e in todays_events]
-        message_parts.append("🎁 *Today's Airdrops:*\n\n" + "\n\n".join(today_messages))
+        message_parts.append("🎁 *Airdrops hôm nay:*\n\n" + "\n\n".join(today_messages))
 
     if upcoming_events:
         if message_parts: message_parts.append("\n\n" + "-"*25 + "\n\n")
         upcoming_messages = [format_event_for_display(e, price_data, e['effective_dt'], include_date=True) for e in upcoming_events]
-        message_parts.append("🗓️ *Upcoming Airdrops:*\n\n" + "\n\n".join(upcoming_messages))
+        message_parts.append("🗓️ *Airdrops sắp tới:*\n\n" + "\n\n".join(upcoming_messages))
 
     if not message_parts:
         final_message = "ℹ️ Không có sự kiện airdrop nào đáng chú ý trong hôm nay và các ngày sắp tới."
