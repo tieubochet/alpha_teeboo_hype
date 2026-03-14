@@ -1,17 +1,14 @@
-# Real-time tracking of Binance Alpha Airdrops
+# Hyperliquid Wallet Tracker Bot
 
-This is a Python-based Telegram bot that fetches and displays upcoming crypto airdrop events. It is built with Flask and designed for easy deployment on Vercel.
-
-The bot automatically sends reminder notifications to subscribed groups before an event begins.
+This is a Python-based Telegram bot that tracks specific wallet addresses on the Hyperliquid DEX. It automatically alerts you whenever a tracked wallet opens a new position. Built with Flask and designed for seamless deployment on Vercel.
 
 ## Key Features
 
--   **View Airdrop Events**: Displays a clean list of today's and upcoming airdrop events.
--   **Interactive Refresh Button**: Allows users to get the latest event list without sending a new command.
--   **Dynamic "Trade" Button**: The trade link button automatically updates to show the token of the next upcoming event (e.g., "Trade ZRO on Hyperliquid").
--   **Automatic Reminders**: Sends a notification to subscribed groups 5 minutes before an event starts.
--   **Auto-Pinning**: Important reminder messages are automatically pinned in the group for visibility.
--   **Easy Subscription**: Group administrators can manage notifications with simple `/start` and `/stop` commands.
+-   **Wallet Management**: Easily add (`/add`), remove (`/remove`), or list (`/list`) tracked Hyperliquid wallets directly via Telegram.
+-   **Real-time Notifications**: Get instant Telegram alerts when a monitored wallet opens a new Long or Short position.
+-   **Detailed Alerts**: Notifications include the token symbol, trade direction, position size, entry price, and leverage used.
+-   **Quick Trade Links**: Each alert includes a direct link to trade the specific token on the Hyperliquid platform.
+-   **Fully Automated**: Utilizes Vercel Cron Jobs (configured via `vercel.json`) to automatically check positions every minute without external services.
 
 ## Tech Stack
 
@@ -19,7 +16,7 @@ The bot automatically sends reminder notifications to subscribed groups before a
 -   **Framework**: Flask
 -   **Deployment**: Vercel
 -   **Database**: Redis (Compatible with Vercel KV, Upstash, etc.)
--   **Data Source**: API
+-   **Data Source**: Hyperliquid API
 
 ## Deployment Guide
 
@@ -42,30 +39,26 @@ In your Vercel project dashboard, go to **Settings -> Environment Variables** an
 
 -   `TELEGRAM_TOKEN`: The token for your Telegram bot, obtained from BotFather.
 -   `REDIS_URL`: The full connection string for your Redis database (e.g., from Vercel KV or Upstash).
--   `CRON_SECRET`: A long, random, secret string that you create. This is used to protect your cron job endpoint.
+-   `CRON_SECRET`: A long, random, secret string that you create. This is used to secure your cron job endpoint.
 
 ### Step 4: Deploy & Set Webhook
 
-1.  Click the **Deploy** button.
+1.  Click the **Deploy** button in Vercel.
 2.  Once the deployment is complete, Vercel will provide you with a URL (e.g., `https://your-bot-name.vercel.app`).
-3.  Set the Telegram webhook by running the following command in your terminal. Replace the placeholders with your actual values.
+3.  Set the Telegram webhook by running the following command in your terminal. Replace the placeholders with your actual values:
     ```bash
-    curl "https://api.telegram.org/bot<YOUR_TELEGRAM_TOKEN>/setWebhook?url=<YOUR_VERCEL_URL>"
+    curl "[https://api.telegram.org/bot](https://api.telegram.org/bot)<YOUR_TELEGRAM_TOKEN>/setWebhook?url=<YOUR_VERCEL_URL>"
     ```
 
-### Step 5: Configure Cron Job
+### Step 5: Cron Job Setup
 
-To enable automatic notifications, you need to set up a cron job to call the `/check_events` endpoint every minute.
+You do **not** need to set up external cron jobs anymore! 
 
-1.  In your Vercel project dashboard, navigate to the **Cron Jobs** tab.
-2.  Create a new job with the following settings:
-    -   **Schedule**: `* * * * *` (This means "run every minute").
-    -   **URL**: `https://<YOUR_VERCEL_URL>/check_events` (Make sure to add `/check_events` to the end of your Vercel URL).
-    -   **HTTP Method**: `POST`
-    -   **Headers**: Add one header with the key `X-Cron-Secret` and the value as the `CRON_SECRET` you created in Step 3.
+The `vercel.json` file is already configured to trigger the `/check_positions` endpoint every minute using Vercel's built-in cron feature. Vercel will automatically use the `CRON_SECRET` environment variable to authenticate the requests.
 
 ## Bot Commands
 
--   `/start` - Displays a welcome message and subscribes the chat to airdrop notifications.
--   `/stop` - Unsubscribes the chat from airdrop notifications.
--   `/alpha` - Shows the current list of today's and upcoming airdrop events.
+-   `/start` - Displays a welcome message and instructions on how to use the bot.
+-   `/add <wallet_address>` - Subscribes your chat to alerts for a specific Hyperliquid wallet.
+-   `/remove <wallet_address>` - Unsubscribes your chat from a specific wallet's alerts.
+-   `/list` - Shows all the wallet addresses you are currently tracking.
